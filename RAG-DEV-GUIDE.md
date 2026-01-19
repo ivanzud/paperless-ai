@@ -23,10 +23,14 @@ In production, both services run in the same Docker container, but for developme
 
 ```bash
 # Install Node.js dependencies
-npm install
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm install
+else
+  npm install
+fi
 
 # Install Python dependencies
-pip install -r requirements.txt
+uv sync --extra gpu
 ```
 
 2. Configure your `.env` file in the `data` directory with your Paperless-NGX credentials:
@@ -55,13 +59,13 @@ chmod +x start-services.sh
 1. Install Python dependencies:
 
 ```bash
-pip install -r requirements.txt
+uv sync --extra gpu
 ```
 
 2. Start the Python RAG service:
 
 ```bash
-python main.py --host 127.0.0.1 --port 8000 --initialize
+uv run python main.py --host 127.0.0.1 --port 8000 --initialize
 ```
 
 The `--initialize` flag will build the document index on startup.

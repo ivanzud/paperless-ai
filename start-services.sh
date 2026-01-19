@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # start-services.sh - Script to start both Node.js and Python services
 
 # Activate virtual environment for Python
