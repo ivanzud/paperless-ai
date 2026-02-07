@@ -956,7 +956,10 @@ class PaperlessService {
 
   normalizeNoteText(note) {
     if (!note) return '';
-    const text = Array.isArray(note) ? note.join('\n') : String(note);
+    if (Array.isArray(note)) {
+      return '';
+    }
+    const text = String(note);
     return text
       .replace(/\r\n/g, '\n')
       .replace(/[ \t]+\n/g, '\n')
