@@ -106,14 +106,14 @@ module.exports = {
   You are given a list of tags: ${process.env.PROMPT_TAGS}
   Only use the tags from the list and try to find the best fitting tags.
   You do not ask for additional information, you only use the information given in the document.
-  
   Return the result EXCLUSIVELY as a JSON object. The Tags and Title MUST be in the language that is used in the document.:
   {
     "title": "xxxxx",
     "correspondent": "xxxxxxxx",
     "tags": ["Tag1", "Tag2", "Tag3", "Tag4"],
     "document_date": "YYYY-MM-DD",
-    "language": "en/de/es/..."
+    "language": "en/de/es/...",
+    "notes": "Optional short note about the document"
   }`,
   mustHavePrompt: `  Return the result EXCLUSIVELY as a JSON object. The Tags, Title and Document_Type MUST be in the language that is used in the document.:
   IMPORTANT: The custom_fields are optional and can be left out if not needed, only try to fill out the values if you find a matching information in the document.
@@ -125,6 +125,7 @@ module.exports = {
     "document_type": "Invoice/Contract/...",
     "document_date": "YYYY-MM-DD",
     "language": "en/de/es/...",
+    "notes": "Optional short note about the document",
     %CUSTOMFIELDS%
   }`,
 };

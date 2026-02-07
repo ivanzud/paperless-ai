@@ -17,6 +17,21 @@ class AzureOpenAIService {
     this.client = null;
   }
 
+  _normalizeNotesField(parsedResponse) {
+    if (!parsedResponse || typeof parsedResponse !== 'object') return parsedResponse;
+    if (parsedResponse.notes == null && parsedResponse.note != null) {
+      parsedResponse.notes = parsedResponse.note;
+    }
+    if (
+      parsedResponse.notes != null &&
+      !Array.isArray(parsedResponse.notes) &&
+      typeof parsedResponse.notes !== 'string'
+    ) {
+      parsedResponse.notes = String(parsedResponse.notes);
+    }
+    return parsedResponse;
+  }
+
   initialize() {
     if (!this.client && config.aiProvider === 'azure') {
       this.client = new AzureOpenAI({
@@ -201,6 +216,7 @@ class AzureOpenAIService {
       let parsedResponse;
       try {
         parsedResponse = JSON.parse(jsonContent);
+        this._normalizeNotesField(parsedResponse);
         //write to file and append to the file (txt)
         fs.appendFile('./logs/response.txt', jsonContent, (err) => {
           if (err) throw err;
@@ -222,7 +238,7 @@ class AzureOpenAIService {
     } catch (error) {
       console.error('Failed to analyze document:', error);
       return {
-        document: { tags: [], correspondent: null },
+        document: { tags: [], correspondent: null, notes: null },
         metrics: null,
         error: error.message
       };
@@ -327,6 +343,7 @@ class AzureOpenAIService {
       let parsedResponse;
       try {
         parsedResponse = JSON.parse(jsonContent);
+        this._normalizeNotesField(parsedResponse);
       } catch (error) {
         console.error('Failed to parse JSON response:', error);
         throw new Error('Invalid JSON response from API');
@@ -345,7 +362,7 @@ class AzureOpenAIService {
     } catch (error) {
       console.error('Failed to analyze document:', error);
       return {
-        document: { tags: [], correspondent: null },
+        document: { tags: [], correspondent: null, notes: null },
         metrics: null,
         error: error.message
       };

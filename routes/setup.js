@@ -1721,6 +1721,16 @@ async function buildUpdateData(analysis, doc) {
     updateData.language = analysis.document.language;
   }
 
+  if (analysis.document.notes) {
+    const notesValue = analysis.document.notes;
+    const hasNotes = Array.isArray(notesValue)
+      ? notesValue.length > 0
+      : String(notesValue).trim().length > 0;
+    if (hasNotes) {
+      updateData.notes = notesValue;
+    }
+  }
+
   return updateData;
 }
 
