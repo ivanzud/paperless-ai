@@ -337,9 +337,8 @@ async function buildUpdateData(analysis, doc) {
 
 async function saveDocumentChanges(docId, updateData, analysis, originalData) {
   const { tags: originalTags, correspondent: originalCorrespondent, title: originalTitle } = originalData;
-  
   await Promise.all([
-    documentModel.saveOriginalData(docId, originalTags, originalCorrespondent, originalTitle),
+    documentModel.saveOriginalData(docId, originalTags, originalCorrespondent, originalTitle, null),
     paperlessService.updateDocument(docId, updateData),
     documentModel.addProcessedDocument(docId, updateData.title),
     documentModel.addOpenAIMetrics(
@@ -348,7 +347,7 @@ async function saveDocumentChanges(docId, updateData, analysis, originalData) {
       analysis.metrics.completionTokens,
       analysis.metrics.totalTokens
     ),
-    documentModel.addToHistory(docId, updateData.tags, updateData.title, analysis.document.correspondent)
+    documentModel.addToHistory(docId, updateData.tags, updateData.title, analysis.document.correspondent, updateData.notes ?? null)
   ]);
 }
 

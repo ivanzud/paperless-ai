@@ -47,6 +47,7 @@ const createTableHistory = db.prepare(`
     tags TEXT,
     title TEXT,
     correspondent TEXT,
+    notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
@@ -59,6 +60,7 @@ const createOriginalDocuments = db.prepare(`
     title TEXT,
     tags TEXT,
     correspondent TEXT,
+    notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
@@ -74,14 +76,25 @@ const userTable = db.prepare(`
 `);
 userTable.run();
 
+function ensureColumn(tableName, columnName, columnDef) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  const hasColumn = columns.some(col => col.name === columnName);
+  if (!hasColumn) {
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDef}`).run();
+  }
+}
+
+ensureColumn('history_documents', 'notes', 'TEXT');
+ensureColumn('original_documents', 'notes', 'TEXT');
+
 
 // Prepare statements for better performance
 const insertDocument = db.prepare(`
   INSERT INTO processed_documents (document_id, title) 
   VALUES (?, ?)
   ON CONFLICT(document_id) DO UPDATE SET
-    last_updated = CURRENT_TIMESTAMP
-  WHERE document_id = ?
+    last_updated = CURRENT_TIMESTAMP,
+    title = excluded.title
 `);
 
 const findDocument = db.prepare(
@@ -94,13 +107,13 @@ const insertMetrics = db.prepare(`
 `);
 
 const insertOriginal = db.prepare(`
-  INSERT INTO original_documents (document_id, title, tags, correspondent)
-  VALUES (?, ?, ?, ?)
+  INSERT INTO original_documents (document_id, title, tags, correspondent, notes)
+  VALUES (?, ?, ?, ?, ?)
 `);
 
 const insertHistory = db.prepare(`
-  INSERT INTO history_documents (document_id, tags, title, correspondent)
-  VALUES (?, ?, ?, ?)
+  INSERT INTO history_documents (document_id, tags, title, correspondent, notes)
+  VALUES (?, ?, ?, ?, ?)
 `);
 
 const insertUser = db.prepare(`
@@ -155,7 +168,7 @@ module.exports = {
   async addProcessedDocument(documentId, title) {
     try {
       // Bei UNIQUE constraint failure wird der existierende Eintrag aktualisiert
-      const result = insertDocument.run(documentId, title, documentId);
+      const result = insertDocument.run(documentId, title);
       if (result.changes > 0) {
         console.log(`[DEBUG] Document ${title} ${result.lastInsertRowid ? 'added to' : 'updated in'} processed_documents`);
         return true;
@@ -220,13 +233,13 @@ module.exports = {
     }
   },
 
-  async saveOriginalData(documentId, tags, correspondent, title) {
+  async saveOriginalData(documentId, tags, correspondent, title, notes = null) {
     try {
       const tagsString = JSON.stringify(tags); // Konvertiere Array zu String
       const result = db.prepare(`
-        INSERT INTO original_documents (document_id, title, tags, correspondent)
-        VALUES (?, ?, ?, ?)
-      `).run(documentId, title, tagsString, correspondent);
+        INSERT INTO original_documents (document_id, title, tags, correspondent, notes)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(documentId, title, tagsString, correspondent, notes);
       if (result.changes > 0) {
         console.log(`[DEBUG] Original data for document ${title} saved`);
         return true;
@@ -238,13 +251,13 @@ module.exports = {
     }
   },
 
-  async addToHistory(documentId, tagIds, title, correspondent) {
+  async addToHistory(documentId, tagIds, title, correspondent, notes = null) {
     try {
       const tagIdsString = JSON.stringify(tagIds); // Konvertiere Array zu String
       const result = db.prepare(`
-        INSERT INTO history_documents (document_id, tags, title, correspondent)
-        VALUES (?, ?, ?, ?)
-      `).run(documentId, tagIdsString, title, correspondent);
+        INSERT INTO history_documents (document_id, tags, title, correspondent, notes)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(documentId, tagIdsString, title, correspondent, notes);
       if (result.changes > 0) {
         console.log(`[DEBUG] Document ${title} added to history`);
         return true;
