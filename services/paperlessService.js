@@ -940,6 +940,30 @@ class PaperlessService {
     const response = await this.client.get(`/documents/${documentId}/`);
     return response.data.content;
   }
+  
+  async downloadDocument(documentId) {
+    this.initialize();
+    try {
+      console.log(`[DEBUG] Downloading original document ${documentId}...`);
+      const response = await this.client.get(`/documents/${documentId}/download/`, {
+        responseType: 'arraybuffer'
+      });
+
+      if (response.data && response.data.byteLength > 0) {
+        console.log(`[SUCCESS] Document ${documentId} downloaded successfully.`);
+        return Buffer.from(response.data);
+      }
+      
+      console.warn(`[WARN] No data received when downloading document ${documentId}`);
+      return null;
+    } catch (error) {
+      console.error(`[ERROR] downloading document ${documentId}:`, error.message);
+      if (error.response) {
+        console.log('[ERROR] status:', error.response.status);
+      }
+      return null;
+    }
+  }
 
   async getDocument(documentId) {
     this.initialize();
