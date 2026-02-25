@@ -91,6 +91,30 @@ class CustomOpenAIService {
       || message.includes('input tokens');
   }
 
+  async _fitChunkToInputBudget(systemPrompt, chunkContent, model, maxInputTokens) {
+    let candidate = String(chunkContent || '');
+    if (!candidate) {
+      return candidate;
+    }
+
+    // Keep tightening until estimated (prompt + chunk) fits within input budget.
+    for (let i = 0; i < 6; i += 1) {
+      const combinedTokens = await calculateTotalPromptTokens(systemPrompt, [candidate], model);
+      if (combinedTokens <= maxInputTokens) {
+        return candidate;
+      }
+
+      const currentChunkTokens = await calculateTokens(candidate, model);
+      const nextChunkTokens = Math.max(120, Math.floor(currentChunkTokens * 0.75));
+      if (nextChunkTokens >= currentChunkTokens) {
+        break;
+      }
+      candidate = await truncateToTokenLimit(candidate, nextChunkTokens, model);
+    }
+
+    return candidate;
+  }
+
   _mergeChunkResults(chunkDocuments) {
     const validDocs = (chunkDocuments || []).filter(Boolean);
     if (validDocs.length === 0) {
@@ -378,6 +402,7 @@ class CustomOpenAIService {
       const maxTokens = Number(config.tokenLimit);
       const reservedTokens = totalPromptTokens + Number(config.responseTokens);
       const availableTokens = maxTokens - reservedTokens;
+      const maxInputTokens = Math.max(512, maxTokens - Number(config.responseTokens));
 
       // Validate that we have positive available tokens
       if (availableTokens <= 0) {
@@ -385,11 +410,21 @@ class CustomOpenAIService {
         throw new Error('Token limit exceeded: prompt too large for available token limit');
       }
 
+      if (totalPromptTokens >= maxInputTokens - 100) {
+        throw new Error(
+          `Prompt description is too large for configured model context. `
+          + `Prompt tokens: ${totalPromptTokens}, max input budget: ${maxInputTokens}. `
+          + `Reduce Prompt Description or increase Token Limit.`
+        );
+      }
+
       console.log(`[DEBUG] Token calculation - Prompt: ${totalPromptTokens}, Reserved: ${reservedTokens}, Available: ${availableTokens}`);
       console.log(`[DEBUG] Use existing data: ${config.useExistingData}, Restrictions applied based on useExistingData setting`);
       console.log(`[DEBUG] External API data: ${validatedExternalApiData ? 'included' : 'none'}`);
 
-      const targetChunkTokens = Math.max(700, Math.floor(availableTokens * 0.8));
+      // Keep a safety margin so Prompt + Chunk stays below model input window.
+      const promptAwareChunkBudget = Math.max(300, maxInputTokens - totalPromptTokens - 96);
+      const targetChunkTokens = Math.max(300, Math.floor(promptAwareChunkBudget * 0.75));
       const contentChunks = this._chunkContent(content, targetChunkTokens);
       const analysisChunks = contentChunks.length > 0 ? contentChunks : [{ index: 0, content: String(content || '') }];
 
@@ -405,7 +440,8 @@ class CustomOpenAIService {
         let success = false;
 
         for (let attempt = 1; attempt <= 4; attempt += 1) {
-          const chunkContent = await truncateToTokenLimit(chunk.content, chunkTokenBudget, model);
+          let chunkContent = await truncateToTokenLimit(chunk.content, chunkTokenBudget, model);
+          chunkContent = await this._fitChunkToInputBudget(systemPrompt, chunkContent, model, maxInputTokens);
           try {
             const chunkResult = await this._analyzeSingleChunk(systemPrompt, chunkContent, model, timestamp);
             successfulChunkDocuments.push(chunkResult.document);
@@ -418,7 +454,17 @@ class CustomOpenAIService {
             lastError = chunkError;
             if (this._isContextOverflowError(chunkError) && chunkTokenBudget > 300) {
               chunkTokenBudget = Math.max(300, Math.floor(chunkTokenBudget * 0.65));
-              console.warn(`[WARNING] Chunk ${chunk.index + 1} exceeded context, retrying with smaller budget (${chunkTokenBudget} tokens)`);
+              console.warn(
+                `[WARNING] Chunk ${chunk.index + 1} exceeded context, retrying with smaller budget (${chunkTokenBudget} tokens).`,
+                {
+                  error: chunkError.message,
+                  status: chunkError.status,
+                  param: chunkError.param || chunkError?.error?.param,
+                  type: chunkError.type || chunkError?.error?.type,
+                  maxInputTokens,
+                  promptTokens: totalPromptTokens
+                }
+              );
               continue;
             }
             break;
@@ -432,7 +478,7 @@ class CustomOpenAIService {
       }
 
       if (successfulChunkDocuments.length === 0) {
-        throw new Error(failedChunks[0] || 'Document analysis failed for all chunks');
+        throw new Error(`Document analysis failed for all chunks. Details: ${failedChunks.slice(0, 3).join(' | ')}`);
       }
 
       const mergedDocument = this._mergeChunkResults(successfulChunkDocuments);
@@ -454,7 +500,13 @@ class CustomOpenAIService {
       return {
         document: { tags: [], correspondent: null },
         metrics: null,
-        error: error.message
+        error: error.message,
+        errorDetails: {
+          status: error.status || error?.error?.status || null,
+          code: error.code || error?.error?.code || null,
+          type: error.type || error?.error?.type || null,
+          param: error.param || error?.error?.param || null
+        }
       };
     }
   }

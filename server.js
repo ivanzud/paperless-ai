@@ -203,7 +203,7 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
       paperlessService.getDocument(doc.id)
     ]);
 
-    if (!content || !content.length >= 10) {
+    if (!content || content.length < 10) {
       console.log(`[DEBUG] Document ${doc.id} has no content, skipping analysis`);
       await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
       return null;
@@ -220,6 +220,11 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
       console.warn(`[WARNING] Document ${doc.id} analyzed with partial chunk failures:`, analysis.warnings);
     }
     if (analysis.error) {
+      console.error(`[ERROR] Detailed analysis error for document ${doc.id}:`, {
+        message: analysis.error,
+        details: analysis.errorDetails || null,
+        warnings: analysis.warnings || []
+      });
       throw new Error(`[ERROR] Document analysis failed: ${analysis.error}`);
     }
     await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
@@ -388,6 +393,9 @@ async function scanInitial() {
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, error);
+        if (error?.stack) {
+          console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
+        }
       }
     }
   } catch (error) {
@@ -430,6 +438,9 @@ async function scanDocuments() {
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, error);
+        if (error?.stack) {
+          console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
+        }
       }
     }
   } catch (error) {
