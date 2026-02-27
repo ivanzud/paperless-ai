@@ -138,8 +138,7 @@ const API_ENDPOINTS = ['/health'];
 let PUBLIC_ROUTES = [
   '/health',
   '/login',
-  '/logout',
-  '/setup'
+  '/logout'
 ];
 
 // Combined middleware to check authentication and setup
@@ -150,6 +149,22 @@ router.use(async (req, res, next) => {
   // Public route check
   if (PUBLIC_ROUTES.some(route => req.path.startsWith(route))) {
     return next();
+  }
+
+  // Allow unauthenticated access to /setup only during initial setup (no users exist)
+  if (req.path.startsWith('/setup')) {
+    try {
+      const users = await documentModel.getUsers();
+      const hasUsers = Array.isArray(users) && users.length > 0;
+      if (!hasUsers) {
+        // First-time setup — no users yet, allow access without auth
+        return next();
+      }
+      // Users exist — require authentication to access /setup
+    } catch (error) {
+      console.error('Error checking users for setup access:', error);
+    }
+    // Fall through to normal auth check below
   }
 
   // API key authentication
@@ -173,17 +188,25 @@ router.use(async (req, res, next) => {
   // Setup check
   try {
     const isConfigured = await setupService.isConfigured();
- 
-    if (!isConfigured && (!process.env.PAPERLESS_AI_INITIAL_SETUP || process.env.PAPERLESS_AI_INITIAL_SETUP === 'no') && !req.path.startsWith('/setup')) {
-      return res.redirect('/setup');
-    } else if (!isConfigured && process.env.PAPERLESS_AI_INITIAL_SETUP === 'yes' && !req.path.startsWith('/settings')) {
-      return res.redirect('/settings');
+
+    if (!isConfigured) {
+      const users = await documentModel.getUsers();
+      const hasUsers = Array.isArray(users) && users.length > 0;
+
+      if (hasUsers && !req.path.startsWith('/settings') && !req.path.startsWith('/setup')) {
+        // Users exist but config broken — redirect to login (not setup)
+        // Authenticated users will reach /settings to fix configuration
+        return res.redirect('/settings');
+      } else if (!hasUsers && !req.path.startsWith('/setup')) {
+        // No users — allow initial setup
+        return res.redirect('/setup');
+      }
     }
   } catch (error) {
     console.error('Error checking setup configuration:', error);
     return res.status(500).send('Internal Server Error');
   }
-  
+
   next();
 });
 
