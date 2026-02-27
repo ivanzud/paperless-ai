@@ -1280,8 +1280,12 @@ async getOrCreateDocumentType(name) {
       }
 
       if (currentDoc.correspondent && updates.correspondent) {
-        console.log('[DEBUG] Document already has a correspondent, keeping existing one:', currentDoc.correspondent);
-        delete updates.correspondent;
+        if (process.env.USE_EXISTING_DATA === 'yes') {
+          console.log('[DEBUG] Document already has a correspondent, keeping existing one:', currentDoc.correspondent);
+          delete updates.correspondent;
+        } else {
+          console.log('[DEBUG] Overwriting correspondent:', currentDoc.correspondent, '->', updates.correspondent);
+        }
       }
 
       let updateData;
