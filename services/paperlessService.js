@@ -1214,21 +1214,37 @@ async getOrCreateDocumentType(name) {
   async getOwnUserID() {
     this.initialize();
     try {
+        // Try /ui_settings/ first - returns current user directly
+        try {
+            const uiResponse = await this.client.get('/ui_settings/');
+            if (uiResponse.data?.user?.id) {
+                console.log(`[DEBUG] Found own user ID via ui_settings: ${uiResponse.data.user.id}`);
+                return uiResponse.data.user.id;
+            }
+        } catch (e) {
+            console.log('[DEBUG] ui_settings endpoint failed, falling back to /users/');
+        }
+
+        // Fallback to /users/ endpoint
         const response = await this.client.get('/users/', {
             params: {
                 current_user: true,
                 full_perms: true
             }
         });
-        
+
         if (response.data.results && response.data.results.length > 0) {
-            const userInfo = response.data.results;
-            //filter for username by process.env.PAPERLESS_USERNAME
-            const user = userInfo.find(user => user.username === process.env.PAPERLESS_USERNAME);
+            // First try exact match by PAPERLESS_USERNAME
+            const user = response.data.results.find(
+                user => user.username === process.env.PAPERLESS_USERNAME
+            );
             if (user) {
                 console.log(`[DEBUG] Found own user ID: ${user.id}`);
                 return user.id;
             }
+            // If no match, use first result (current_user=true already filters)
+            console.log(`[DEBUG] PAPERLESS_USERNAME "${process.env.PAPERLESS_USERNAME}" not found in results, using first result: ${response.data.results[0].id}`);
+            return response.data.results[0].id;
         }
         return null;
     } catch (error) {
