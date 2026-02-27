@@ -182,7 +182,7 @@ async function saveOpenApiSpec() {
 
 // Document processing functions
 async function processDocument(doc, existingTags, existingCorrespondentList, existingDocumentTypesList, ownUserId) {
-  const isProcessed = await documentModel.isDocumentProcessed(doc.id);
+  const isProcessed = await documentModel.isDocumentProcessed(doc.id, doc.checksum);
   if (isProcessed) return null;
   await documentModel.setProcessingStatus(doc.id, doc.title, 'processing');
 
@@ -330,11 +330,11 @@ async function buildUpdateData(analysis, doc) {
 
 async function saveDocumentChanges(docId, updateData, analysis, originalData) {
   const { tags: originalTags, correspondent: originalCorrespondent, title: originalTitle } = originalData;
-  
+
   await Promise.all([
     documentModel.saveOriginalData(docId, originalTags, originalCorrespondent, originalTitle),
     paperlessService.updateDocument(docId, updateData),
-    documentModel.addProcessedDocument(docId, updateData.title),
+    documentModel.addProcessedDocument(docId, updateData.title, originalData.checksum),
     documentModel.addOpenAIMetrics(
       docId, 
       analysis.metrics.promptTokens,
