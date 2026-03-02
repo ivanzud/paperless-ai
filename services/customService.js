@@ -418,9 +418,19 @@ class CustomOpenAIService {
       );
 
       const maxTokens = Number(config.tokenLimit);
-      const reservedTokens = totalPromptTokens + Number(config.responseTokens);
+      const configuredResponseTokens = Number(config.responseTokens);
+      let responseTokenBudget = Number.isFinite(configuredResponseTokens) && configuredResponseTokens > 0
+        ? configuredResponseTokens
+        : 1000;
+
+      // Guard against self-deadlock if response budget is configured >= context window.
+      if (responseTokenBudget >= maxTokens) {
+        responseTokenBudget = Math.max(128, Math.floor(maxTokens * 0.1));
+      }
+
+      const reservedTokens = totalPromptTokens + responseTokenBudget;
       const availableTokens = maxTokens - reservedTokens;
-      const maxInputTokens = Math.max(512, maxTokens - Number(config.responseTokens));
+      const maxInputTokens = Math.max(512, maxTokens - responseTokenBudget);
 
       // Validate that we have positive available tokens
       if (availableTokens <= 0) {
@@ -436,7 +446,7 @@ class CustomOpenAIService {
         );
       }
 
-      console.log(`[DEBUG] Token calculation - Prompt: ${totalPromptTokens}, Reserved: ${reservedTokens}, Available: ${availableTokens}`);
+      console.log(`[DEBUG] Token calculation - Prompt: ${totalPromptTokens}, Reserved: ${reservedTokens}, Available: ${availableTokens}, ResponseBudget: ${responseTokenBudget}`);
       console.log(`[DEBUG] Use existing data: ${config.useExistingData}, Restrictions applied based on useExistingData setting`);
       console.log(`[DEBUG] External API data: ${validatedExternalApiData ? 'included' : 'none'}`);
 
