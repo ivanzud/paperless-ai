@@ -321,8 +321,17 @@ async function buildUpdateData(analysis, doc) {
     // First, add any new/updated fields
     for (const key in customFields) {
       const customField = customFields[key];
-      
-      if (!customField.field_name || !customField.value?.trim?.()) {
+
+      const normalizedFieldValue = typeof customField.value === 'string'
+        ? customField.value.trim()
+        : customField.value;
+
+      if (
+        !customField.field_name ||
+        normalizedFieldValue === undefined ||
+        normalizedFieldValue === null ||
+        (typeof normalizedFieldValue === 'string' && !normalizedFieldValue)
+      ) {
         console.log(`[DEBUG] Skipping empty/invalid custom field`);
         continue;
       }
@@ -331,7 +340,7 @@ async function buildUpdateData(analysis, doc) {
       if (fieldDetails?.id) {
         processedFields.push({
           field: fieldDetails.id,
-          value: customField.value.trim()
+          value: normalizedFieldValue
         });
         processedFieldIds.add(fieldDetails.id);
       }
