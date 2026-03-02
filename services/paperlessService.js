@@ -1471,39 +1471,40 @@ async getOrCreateDocumentType(name, options = {}) {
         }
       }
 
-      let updateData;
+      let updateData = { ...updates };
       try {
         if (updates.created) {
-          let dateObject;
-          
-          dateObject = parseISO(updates.created);
-          
+          const createdValue = String(updates.created).trim();
+          let dateObject = parseISO(createdValue);
+
           if (!isValid(dateObject)) {
-            dateObject = parse(updates.created, 'dd.MM.yyyy', new Date());
-            if (!isValid(dateObject)) {
-              dateObject = parse(updates.created, 'dd-MM-yyyy', new Date());
+            const dateFormats = [
+              'dd.MM.yyyy',
+              'dd-MM-yyyy',
+              'dd/MM/yyyy',
+              'MM/dd/yyyy',
+              'yyyy/MM/dd'
+            ];
+
+            for (const dateFormat of dateFormats) {
+              dateObject = parse(createdValue, dateFormat, new Date());
+              if (isValid(dateObject)) {
+                break;
+              }
             }
           }
-          
-          if (!isValid(dateObject)) {
-            console.warn(`[WARN] Invalid date format: ${updates.created}, using fallback date: 01.01.1990`);
-            dateObject = new Date(1990, 0, 1);
+
+          if (isValid(dateObject)) {
+            updateData.created = format(dateObject, 'yyyy-MM-dd');
+          } else {
+            console.warn(`[WARN] Invalid date format: ${updates.created}, skipping created date update`);
+            delete updateData.created;
           }
-      
-          updateData = {
-            ...updates,
-            created: format(dateObject, 'yyyy-MM-dd'),
-          };
-        } else {
-          updateData = { ...updates };
         }
       } catch (error) {
         console.warn('[WARN] Error parsing date:', error.message);
         console.warn('[DEBUG] Received Date:', updates);
-        updateData = {
-          ...updates,
-          created: format(new Date(1990, 0, 1), 'yyyy-MM-dd'),
-        };
+        delete updateData.created;
       }
 
       // // Handle custom fields update
