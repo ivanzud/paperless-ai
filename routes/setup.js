@@ -1757,9 +1757,6 @@ async function buildUpdateData(analysis, doc) {
   return updateData;
 }
 
-  return updateData;
-}
-
 async function saveDocumentChanges(docId, updateData, analysis, originalData) {
   const { tags: originalTags, correspondent: originalCorrespondent, title: originalTitle } = originalData;
 
