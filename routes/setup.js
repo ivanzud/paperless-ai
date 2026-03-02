@@ -1578,6 +1578,7 @@ try {
       } catch (error) {
         console.error('[ERROR]  during document scan:', error);
       } finally {
+        await releaseOllamaModelIfIdle();
         runningTask = false;
         console.log('[INFO] Task completed');
         res.send('Task completed');
@@ -2420,6 +2421,18 @@ const QUEUE_RATE_LIMIT_COOLDOWN_MS = 60 * 1000;
 let queueRateLimitResumeAt = 0;
 let queueRateLimitTimer = null;
 
+async function releaseOllamaModelIfIdle() {
+  if ((process.env.AI_PROVIDER || '').toLowerCase() !== 'ollama') {
+    return;
+  }
+
+  try {
+    await ollamaService.unloadModel();
+  } catch (error) {
+    console.warn('[WARNING] Failed to release Ollama model after processing:', error.message);
+  }
+}
+
 function isRateLimitError(error) {
   if (!error) {
     return false;
@@ -2537,6 +2550,8 @@ async function processQueue(customPrompt) {
       } else {
         processQueue(customPrompt);
       }
+    } else {
+      await releaseOllamaModelIfIdle();
     }
   }
 }
@@ -3903,6 +3918,7 @@ router.post('/setup', express.json(), async (req, res) => {
       AZURE_API_KEY: azureApiKey || '',
       AZURE_DEPLOYMENT_NAME: azureDeploymentName || '',
       AZURE_API_VERSION: azureApiVersion || '',
+      OLLAMA_KEEP_ALIVE: process.env.OLLAMA_KEEP_ALIVE || configFile.ollama?.keepAlive || '5m',
 	  GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
       GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-2.5-flash'
     };
@@ -4217,6 +4233,7 @@ router.post('/settings', express.json(), async (req, res) => {
       OPENAI_MODEL: process.env.OPENAI_MODEL || '',
       OLLAMA_API_URL: process.env.OLLAMA_API_URL || '',
       OLLAMA_MODEL: process.env.OLLAMA_MODEL || '',
+      OLLAMA_KEEP_ALIVE: process.env.OLLAMA_KEEP_ALIVE || configFile.ollama?.keepAlive || '5m',
       SCAN_INTERVAL: process.env.SCAN_INTERVAL || '*/30 * * * *',
       SYSTEM_PROMPT: process.env.SYSTEM_PROMPT || '',
       PROCESS_PREDEFINED_DOCUMENTS: process.env.PROCESS_PREDEFINED_DOCUMENTS || 'no',

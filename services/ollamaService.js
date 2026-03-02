@@ -24,6 +24,7 @@ class OllamaService {
         this.apiUrl = config.ollama.apiUrl;
         this.model = config.ollama.model;
         this.keepAlive = config.ollama.keepAlive;
+        this.unloadInProgress = null;
         this.client = axios.create({
             timeout: 1800000 // 30 minutes timeout
         });
@@ -66,6 +67,54 @@ class OllamaService {
             },
             required: ["title", "correspondent", "tags", "document_type", "document_date", "language"]
         };
+    }
+
+    _getKeepAlive() {
+        const runtimeKeepAlive = process.env.OLLAMA_KEEP_ALIVE;
+        const keepAlive = runtimeKeepAlive !== undefined ? runtimeKeepAlive : this.keepAlive;
+
+        if (keepAlive === undefined || keepAlive === null || String(keepAlive).trim() === '') {
+            return '5m';
+        }
+
+        return String(keepAlive).trim();
+    }
+
+    _applyKeepAlive(requestBody) {
+        requestBody.keep_alive = this._getKeepAlive();
+    }
+
+    async unloadModel() {
+        if (this.unloadInProgress) {
+            return this.unloadInProgress;
+        }
+
+        this.unloadInProgress = (async () => {
+            try {
+                await this.client.post(`${this.apiUrl}/api/generate`, {
+                    model: this.model,
+                    stream: false,
+                    keep_alive: 0
+                });
+                console.log('[DEBUG] Requested Ollama model unload');
+            } catch (error) {
+                try {
+                    await this.client.post(`${this.apiUrl}/api/generate`, {
+                        model: this.model,
+                        prompt: '',
+                        stream: false,
+                        keep_alive: 0
+                    });
+                    console.log('[DEBUG] Requested Ollama model unload (fallback payload)');
+                } catch (fallbackError) {
+                    console.warn('[WARNING] Failed to unload Ollama model:', fallbackError.message);
+                }
+            } finally {
+                this.unloadInProgress = null;
+            }
+        })();
+
+        return this.unloadInProgress;
     }
 
     /**
@@ -571,9 +620,7 @@ class OllamaService {
             format: schema,
             options: requestOptions
         };
-        if (this.keepAlive !== undefined && this.keepAlive !== null && String(this.keepAlive).trim() !== '') {
-            requestBody.keep_alive = this.keepAlive;
-        }
+        this._applyKeepAlive(requestBody);
 
         const response = await this.client.post(`${this.apiUrl}/api/generate`, requestBody);
 
@@ -760,9 +807,7 @@ class OllamaService {
                 stream: false,
                 options: requestOptions
             };
-            if (this.keepAlive !== undefined && this.keepAlive !== null && String(this.keepAlive).trim() !== '') {
-                requestBody.keep_alive = this.keepAlive;
-            }
+            this._applyKeepAlive(requestBody);
 
             // Call Ollama API without enforcing a specific response format
             const response = await this.client.post(`${this.apiUrl}/api/generate`, requestBody);
