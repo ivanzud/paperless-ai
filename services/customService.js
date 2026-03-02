@@ -33,6 +33,37 @@ class CustomOpenAIService {
     return parsedResponse;
   }
 
+  _sanitizeJsonString(jsonStr) {
+    return String(jsonStr || '')
+      .replace(/,\s*}/g, '}')
+      .replace(/,\s*]/g, ']')
+      .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":');
+  }
+
+  _extractJsonCandidate(raw) {
+    const content = String(raw || '').trim();
+    const fenceCleaned = content.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+
+    const firstBrace = fenceCleaned.indexOf('{');
+    const lastBrace = fenceCleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      return fenceCleaned.slice(firstBrace, lastBrace + 1);
+    }
+
+    return fenceCleaned;
+  }
+
+  _parseResponseJson(raw) {
+    const candidate = this._extractJsonCandidate(raw);
+
+    try {
+      return JSON.parse(candidate);
+    } catch (_) {
+      const sanitized = this._sanitizeJsonString(candidate);
+      return JSON.parse(sanitized);
+    }
+  }
+
   initialize() {
     if (!this.client && config.aiProvider === 'custom') {
       this.client = new OpenAI({
@@ -270,13 +301,10 @@ class CustomOpenAIService {
     console.log(`[DEBUG] [${timestamp}] Custom OpenAI request sent`);
     console.log(`[DEBUG] [${timestamp}] Total tokens: ${response.usage?.total_tokens ?? 0}`);
 
-    let jsonContent = response.choices[0].message.content;
-    jsonContent = jsonContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
     let parsedResponse;
     try {
-      parsedResponse = JSON.parse(jsonContent);
-      await fs.appendFile('./logs/response.txt', jsonContent);
+      parsedResponse = this._parseResponseJson(response.choices[0].message.content);
+      await fs.appendFile('./logs/response.txt', JSON.stringify(parsedResponse));
     } catch (error) {
       console.error('Failed to parse JSON response:', error);
       throw new Error('Invalid JSON response from API');
@@ -631,12 +659,9 @@ class CustomOpenAIService {
         totalTokens: usage.total_tokens
       };
 
-      let jsonContent = response.choices[0].message.content;
-      jsonContent = jsonContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
       let parsedResponse;
       try {
-        parsedResponse = JSON.parse(jsonContent);
+        parsedResponse = this._parseResponseJson(response.choices[0].message.content);
         this._normalizeNotesField(parsedResponse);
       } catch (error) {
         console.error('Failed to parse JSON response:', error);
