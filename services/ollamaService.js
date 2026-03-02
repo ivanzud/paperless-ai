@@ -23,6 +23,7 @@ class OllamaService {
     constructor() {
         this.apiUrl = config.ollama.apiUrl;
         this.model = config.ollama.model;
+        this.keepAlive = config.ollama.keepAlive;
         this.client = axios.create({
             timeout: 1800000 // 30 minutes timeout
         });
@@ -550,21 +551,31 @@ class OllamaService {
      * @returns {Object} Ollama API response
      */
     async _callOllamaAPI(prompt, systemPrompt, numCtx, schema) {
-        const response = await this.client.post(`${this.apiUrl}/api/generate`, {
+        const requestOptions = {
+            temperature: 0.7,
+            top_p: 0.9,
+            repeat_penalty: 1.1,
+            top_k: 7,
+            num_predict: 256
+        };
+        const parsedNumCtx = Number(numCtx);
+        if (Number.isFinite(parsedNumCtx) && parsedNumCtx > 0) {
+            requestOptions.num_ctx = parsedNumCtx;
+        }
+
+        const requestBody = {
             model: this.model,
             prompt: prompt,
             system: systemPrompt,
             stream: false,
             format: schema,
-            options: {
-                temperature: 0.7,
-                top_p: 0.9,
-                repeat_penalty: 1.1,
-                top_k: 7,
-                num_predict: 256,
-                num_ctx: numCtx
-            }
-        });
+            options: requestOptions
+        };
+        if (this.keepAlive !== undefined && this.keepAlive !== null && String(this.keepAlive).trim() !== '') {
+            requestBody.keep_alive = this.keepAlive;
+        }
+
+        const response = await this.client.post(`${this.apiUrl}/api/generate`, requestBody);
 
         if (!response.data) {
             throw new Error('Invalid response from Ollama API');
@@ -702,19 +713,29 @@ class OllamaService {
             // Simple system prompt for text generation
             const systemPrompt = `You are a helpful assistant. Generate a clear, concise, and informative response to the user's question or request.`;
 
-            // Call Ollama API without enforcing a specific response format
-            const response = await this.client.post(`${this.apiUrl}/api/generate`, {
+            const requestOptions = {
+                temperature: 0.7,
+                top_p: 0.9,
+                num_predict: 1024
+            };
+            const parsedNumCtx = Number(numCtx);
+            if (Number.isFinite(parsedNumCtx) && parsedNumCtx > 0) {
+                requestOptions.num_ctx = parsedNumCtx;
+            }
+
+            const requestBody = {
                 model: this.model,
                 prompt: prompt,
                 system: systemPrompt,
                 stream: false,
-                options: {
-                    temperature: 0.7,
-                    top_p: 0.9,
-                    num_predict: 1024,
-                    num_ctx: numCtx
-                }
-            });
+                options: requestOptions
+            };
+            if (this.keepAlive !== undefined && this.keepAlive !== null && String(this.keepAlive).trim() !== '') {
+                requestBody.keep_alive = this.keepAlive;
+            }
+
+            // Call Ollama API without enforcing a specific response format
+            const response = await this.client.post(`${this.apiUrl}/api/generate`, requestBody);
 
             if (!response.data || !response.data.response) {
                 throw new Error('Invalid response from Ollama API');
