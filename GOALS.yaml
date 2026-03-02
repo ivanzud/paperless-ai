@@ -1,0 +1,18 @@
+version: 1
+mission: "Continuously integrate upstream work into the fork and burn down the tracked backlog."
+
+goals:
+  - id: fork-main-reachable
+    description: "Fork main branch is reachable and writable for integration pushes."
+    check: "bash scripts/goals/check_fork_main_sync.sh"
+    weight: 10
+
+  - id: unresolved-upstream-pr-backlog
+    description: "All unresolved upstream PR conflict tasks are closed."
+    check: "bash scripts/goals/check_upstream_pr_backlog.sh"
+    weight: 9
+
+  - id: unresolved-upstream-issue-backlog
+    description: "All tracked upstream issue tasks are closed."
+    check: "bash scripts/goals/check_upstream_issue_backlog.sh"
+    weight: 7
