@@ -536,6 +536,13 @@ body {
     background: var(--card-bg);
 }
 
+/* Keep dashboard detail modal opaque in both themes. */
+.modal-container,
+.modal-header,
+.modal-content {
+    background-color: var(--card-bg) !important;
+}
+
 /* Theme Toggle */
 .theme-toggle {
     position: fixed;
