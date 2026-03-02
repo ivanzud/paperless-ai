@@ -65,6 +65,25 @@ BM25_WEIGHT = 0.3
 SEMANTIC_WEIGHT = 0.7
 MAX_RESULTS = 20
 
+def _parse_bool_env(var_name: str, default: bool) -> bool:
+    value = os.getenv(var_name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    logger.warning(
+        "Invalid boolean value '%s' for %s. Falling back to %s.",
+        value,
+        var_name,
+        default,
+    )
+    return default
+
 # Download NLTK resources if not present
 nltk.download('punkt', quiet=True)
 nltk.download('punkt_tab', quiet=True)
@@ -215,10 +234,12 @@ class DataManager:
         
         self.paperless_url = paperless_api_url
         self.paperless_token = os.getenv("PAPERLESS_TOKEN") or os.getenv("PAPERLESS_API_TOKEN") or os.getenv("PAPERLESS_APIKEY")
+        self.paperless_ssl_verify: Union[bool, str] = self._get_paperless_ssl_verify_setting()
         
         # Debug-Informationen ausgeben
         logger.info(f"Environment variables: PAPERLESS_API_URL={os.getenv('PAPERLESS_API_URL')}, PAPERLESS_URL={os.getenv('PAPERLESS_URL')}, PAPERLESS_NGX_URL={os.getenv('PAPERLESS_NGX_URL')}, PAPERLESS_HOST={os.getenv('PAPERLESS_HOST')}")
         logger.info(f"Environment variables: PAPERLESS_TOKEN={'[SET]' if os.getenv('PAPERLESS_TOKEN') else '[NOT SET]'}, PAPERLESS_API_TOKEN={'[SET]' if os.getenv('PAPERLESS_API_TOKEN') else '[NOT SET]'}, PAPERLESS_APIKEY={'[SET]' if os.getenv('PAPERLESS_APIKEY') else '[NOT SET]'}")
+        logger.info(f"Environment variables: PAPERLESS_VERIFY_SSL={os.getenv('PAPERLESS_VERIFY_SSL')}, PAPERLESS_SSL_VERIFY={os.getenv('PAPERLESS_SSL_VERIFY')}, PAPERLESS_CA_BUNDLE={os.getenv('PAPERLESS_CA_BUNDLE')}")
         
         if not self.paperless_url or not self.paperless_token:
             logger.error("Missing PAPERLESS_API_URL/PAPERLESS_URL or PAPERLESS_API_TOKEN in .env file")
@@ -277,6 +298,30 @@ class DataManager:
     
     def _get_headers(self):
         return {"Authorization": f"Token {self.paperless_token}"}
+
+    def _get_paperless_ssl_verify_setting(self) -> Union[bool, str]:
+        ca_bundle_path = os.getenv("PAPERLESS_CA_BUNDLE")
+        if ca_bundle_path:
+            logger.info(f"Using PAPERLESS_CA_BUNDLE for Paperless API SSL verification: {ca_bundle_path}")
+            return ca_bundle_path
+
+        verify_ssl = _parse_bool_env(
+            "PAPERLESS_VERIFY_SSL",
+            _parse_bool_env("PAPERLESS_SSL_VERIFY", True)
+        )
+        if not verify_ssl:
+            logger.warning(
+                "SSL certificate verification for Paperless API requests is disabled via PAPERLESS_VERIFY_SSL/PAPERLESS_SSL_VERIFY."
+            )
+        return verify_ssl
+
+    def _paperless_get(self, url: str, timeout: int) -> requests.Response:
+        return requests.get(
+            url,
+            headers=self._get_headers(),
+            timeout=timeout,
+            verify=self.paperless_ssl_verify
+        )
     
     def _compute_document_hash(self, doc):
         """Compute a hash for a document to track changes"""
@@ -290,11 +335,7 @@ class DataManager:
         try:
             # Prüfe nur die ersten Seite der API, um zu sehen, ob es Änderungen gibt
             url = f"{self.paperless_url}/api/documents/?page=1&page_size=10"
-            response = requests.get(
-                url,
-                headers=self._get_headers(),
-                timeout=10
-            )
+            response = self._paperless_get(url, timeout=10)
             
             if response.status_code != 200:
                 return False, f"API error: {response.status_code}"
@@ -332,11 +373,7 @@ class DataManager:
                 url = f"{self.paperless_url}/api/documents/?page={page}&page_size=100"
                 logger.info(f"Making request to: {url}")
                 
-                response = requests.get(
-                    url,
-                    headers=self._get_headers(),
-                    timeout=30
-                )
+                response = self._paperless_get(url, timeout=30)
                 
                 # Log response information for debugging
                 logger.info(f"Response status code: {response.status_code}")
@@ -375,9 +412,8 @@ class DataManager:
         for doc in tqdm(documents, desc="Processing documents"):
             # Fetch document content if not included in listing
             if "content" not in doc or not doc["content"]:
-                content_response = requests.get(
+                content_response = self._paperless_get(
                     f"{self.paperless_url}/api/documents/{doc['id']}/download/txt/",
-                    headers=self._get_headers(),
                     timeout=30
                 )
                 
@@ -393,9 +429,8 @@ class DataManager:
             correspondent = ""
             if doc.get("correspondent"):
                 corr_id = doc["correspondent"]
-                corr_response = requests.get(
+                corr_response = self._paperless_get(
                     f"{self.paperless_url}/api/correspondents/{corr_id}/",
-                    headers=self._get_headers(),
                     timeout=10
                 )
                 
@@ -406,9 +441,8 @@ class DataManager:
             tags = []
             if doc.get("tags"):
                 for tag_id in doc["tags"]:
-                    tag_response = requests.get(
+                    tag_response = self._paperless_get(
                         f"{self.paperless_url}/api/tags/{tag_id}/",
-                        headers=self._get_headers(),
                         timeout=10
                     )
                     
@@ -1531,6 +1565,7 @@ async def startup_event():
                 f.write("# Paperless-NGX API configuration\n")
                 f.write("PAPERLESS_URL=https://your-paperless-instance\n")
                 f.write("PAPERLESS_API_TOKEN=your-api-token\n")
+                f.write("PAPERLESS_VERIFY_SSL=true\n")
             logger.info(f"Created example .env file at {os.path.abspath(env_file_path)}")
             logger.info("Please edit the .env file with your Paperless-NGX API configuration")
             logger.warning("Starting with limited functionality due to missing API configuration")
