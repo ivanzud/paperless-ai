@@ -1468,11 +1468,12 @@ async getOrCreateDocumentType(name, options = {}) {
         if (config.overwriteExistingCorrespondent === 'yes') {
           console.log(`[DEBUG] Overwriting existing correspondent ${currentDoc.correspondent} with AI suggestion: ${updates.correspondent}`);
         } else {
-          console.log('[DEBUG] Document already has a correspondent, keeping existing one:', currentDoc.correspondent);
-          delete updates.correspondent;
+          console.log('[DEBUG] Document already has a correspondent, keeping existing one and preserving it in payload:', currentDoc.correspondent);
+          updates.correspondent = currentDoc.correspondent;
         }
       }
 
+      const hasValue = (value) => value !== undefined && value !== null && value !== '';
       let updateData = { ...updates };
       try {
         if (updates.created) {
@@ -1515,6 +1516,59 @@ async getOrCreateDocumentType(name, options = {}) {
         console.warn('[WARN] Error parsing date:', error.message);
         console.warn('[DEBUG] Received Date:', updates);
         delete updateData.created;
+      }
+
+      if (Array.isArray(updateData.custom_fields)) {
+        const sanitizedCustomFields = [];
+
+        for (const [index, customField] of updateData.custom_fields.entries()) {
+          if (!customField || typeof customField !== 'object' || Array.isArray(customField)) {
+            console.warn(`[WARN] Skipping invalid custom field metadata at index ${index} for document ${documentId}`);
+            continue;
+          }
+
+          if (!hasValue(customField.field) || !hasValue(customField.value)) {
+            console.warn(`[WARN] Skipping incomplete custom field metadata at index ${index} for document ${documentId}`);
+            continue;
+          }
+
+          let normalizedValue = customField.value;
+          if (typeof normalizedValue === 'string') {
+            normalizedValue = normalizedValue.trim();
+            if (!normalizedValue) {
+              console.warn(`[WARN] Skipping empty custom field value at index ${index} for document ${documentId}`);
+              continue;
+            }
+            if (normalizedValue.length > 128) {
+              normalizedValue = normalizedValue.substring(0, 128);
+              console.warn(`[WARN] Truncated custom field ${customField.field} to 128 characters for document ${documentId}`);
+            }
+          }
+
+          sanitizedCustomFields.push({
+            ...customField,
+            value: normalizedValue
+          });
+        }
+
+        if (sanitizedCustomFields.length > 0) {
+          updateData.custom_fields = sanitizedCustomFields;
+        } else {
+          delete updateData.custom_fields;
+        }
+      }
+
+      const requiredMetadataFields = ['correspondent', 'storage_path'];
+      for (const fieldName of requiredMetadataFields) {
+        if (hasValue(updateData[fieldName])) {
+          continue;
+        }
+
+        const existingValue = currentDoc?.[fieldName];
+        if (hasValue(existingValue)) {
+          updateData[fieldName] = existingValue;
+          console.warn(`[WARN] Preserving existing ${fieldName} in payload for document ${documentId}`);
+        }
       }
 
       // // Handle custom fields update

@@ -1702,13 +1702,20 @@ async function buildUpdateData(analysis, doc) {
     // First, add any new/updated fields
     for (const key in customFields) {
       const customField = customFields[key];
+      if (!customField || typeof customField !== 'object' || Array.isArray(customField)) {
+        console.log(`[DEBUG] Skipping malformed custom field metadata for key "${key}"`);
+        continue;
+      }
 
-      const normalizedFieldValue = typeof customField.value === 'string'
+      const normalizedFieldName = typeof customField.field_name === 'string'
+        ? customField.field_name.trim()
+        : '';
+      let normalizedFieldValue = typeof customField.value === 'string'
         ? customField.value.trim()
         : customField.value;
 
       if (
-        !customField.field_name ||
+        !normalizedFieldName ||
         normalizedFieldValue === undefined ||
         normalizedFieldValue === null ||
         (typeof normalizedFieldValue === 'string' && !normalizedFieldValue)
@@ -1717,7 +1724,12 @@ async function buildUpdateData(analysis, doc) {
         continue;
       }
 
-      const fieldDetails = await paperlessService.findExistingCustomField(customField.field_name);
+      if (typeof normalizedFieldValue === 'string' && normalizedFieldValue.length > 128) {
+        normalizedFieldValue = normalizedFieldValue.substring(0, 128);
+        console.warn(`[WARN] Truncated custom field "${normalizedFieldName}" to 128 characters for document ${doc.id}`);
+      }
+
+      const fieldDetails = await paperlessService.findExistingCustomField(normalizedFieldName);
       if (fieldDetails?.id) {
         processedFields.push({
           field: fieldDetails.id,
