@@ -949,7 +949,9 @@ class PaperlessService {
 
   async getDocumentContent(documentId) {
     this.initialize();
-    const response = await this.client.get(`/documents/${documentId}/`);
+    const configuredTimeout = Number.parseInt(process.env.PAPERLESS_CONTENT_TIMEOUT_MS || '', 10);
+    const timeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 15000;
+    const response = await this.client.get(`/documents/${documentId}/`, { timeout });
     return response.data.content;
   }
   

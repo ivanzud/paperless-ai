@@ -9,6 +9,31 @@ class RagService {
     this.baseUrl = process.env.RAG_SERVICE_URL || 'http://localhost:8000';
   }
 
+  parseTimeoutMs(value, fallbackMs) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
+  }
+
+  withTimeout(promise, timeoutMs, timeoutMessage) {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        const timeoutError = new Error(timeoutMessage);
+        timeoutError.code = 'ETIMEDOUT';
+        reject(timeoutError);
+      }, timeoutMs);
+
+      promise
+        .then((result) => {
+          clearTimeout(timeoutId);
+          resolve(result);
+        })
+        .catch((error) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        });
+    });
+  }
+
   /**
    * Check if the RAG service is available and ready
    * @returns {Promise<{status: string, index_ready: boolean, data_loaded: boolean}>}
@@ -55,11 +80,20 @@ class RagService {
    */
   async askQuestion(question) {
     try {
+      const contextTimeoutMs = this.parseTimeoutMs(process.env.RAG_CONTEXT_TIMEOUT_MS, 30000);
       // 1. Get context from the RAG service
-      const response = await axios.post(`${this.baseUrl}/context`, { 
-        question,
-        max_sources: 5
-      });
+      const response = await this.withTimeout(
+        axios.post(
+          `${this.baseUrl}/context`,
+          {
+            question,
+            max_sources: 5
+          },
+          { timeout: contextTimeoutMs }
+        ),
+        contextTimeoutMs,
+        `RAG context request timed out after ${contextTimeoutMs}ms`
+      );
       
       const { context, sources } = response.data;
       
@@ -89,6 +123,7 @@ class RagService {
       
       // 3. Use AI service to generate an answer based on the enhanced context
       const aiService = AIServiceFactory.getService();
+      const aiTimeoutMs = this.parseTimeoutMs(process.env.RAG_AI_TIMEOUT_MS, 120000);
       
       // Create a language-agnostic prompt that works in any language
       const prompt = `
@@ -111,10 +146,18 @@ class RagService {
 
       let answer;
       try {
-        answer = await aiService.generateText(prompt);
+        answer = await this.withTimeout(
+          aiService.generateText(prompt),
+          aiTimeoutMs,
+          `AI response timed out after ${aiTimeoutMs}ms`
+        );
       } catch (error) {
         console.error('Error generating answer with AI service:', error);
-        answer = "An error occurred while generating an answer. Please try again later.";
+        if (error && error.code === 'ETIMEDOUT') {
+          answer = `The AI response timed out after ${Math.round(aiTimeoutMs / 1000)} seconds. Please try again later.`;
+        } else {
+          answer = "An error occurred while generating an answer. Please try again later.";
+        }
       }
       
       return {
@@ -123,6 +166,9 @@ class RagService {
       };
     } catch (error) {
       console.error('Error in askQuestion:', error);
+      if (error && (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED')) {
+        throw error;
+      }
       throw new Error("An error occurred while processing your question. Please try again later.");
     }
   }

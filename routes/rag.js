@@ -3,6 +3,31 @@ const express = require('express');
 const router = express.Router();
 const ragService = require('../services/ragService');
 
+function parseTimeoutMs(value, fallbackMs) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
+}
+
+function withTimeout(promise, timeoutMs, timeoutMessage) {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      const timeoutError = new Error(timeoutMessage);
+      timeoutError.code = 'ETIMEDOUT';
+      reject(timeoutError);
+    }, timeoutMs);
+
+    promise
+      .then((result) => {
+        clearTimeout(timeoutId);
+        resolve(result);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
 /**
  * Search documents
  */
@@ -37,11 +62,19 @@ router.post('/ask', async (req, res) => {
     if (!question) {
       return res.status(400).json({ error: 'Question is required' });
     }
-    
-    const result = await ragService.askQuestion(question);
+
+    const askTimeoutMs = parseTimeoutMs(process.env.RAG_ASK_TIMEOUT_MS, 125000);
+    const result = await withTimeout(
+      ragService.askQuestion(question),
+      askTimeoutMs,
+      `RAG chat request timed out after ${Math.round(askTimeoutMs / 1000)} seconds`
+    );
     res.json(result);
   } catch (error) {
     console.error('Error in /api/rag/ask:', error);
+    if (error && (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED')) {
+      return res.status(504).json({ error: error.message || 'RAG chat request timed out' });
+    }
     res.status(500).json({ error: error.message || 'Internal server error' });
   }
 });

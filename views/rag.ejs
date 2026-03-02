@@ -1032,7 +1032,7 @@
             apiStatus.appendChild(badge);
         }
 
-        function sendMessage() {
+        async function sendMessage() {
             const questionText = messageInput.value.trim();
             if (!questionText) return;
             
@@ -1062,43 +1062,72 @@
             
             // Prepare request
             const endpoint = '/api/rag/ask';
-            
-            fetch(endpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    question: questionText,
-                    useAI: useAI,
-                    from_date: fromDate || undefined,
-                    to_date: toDate || undefined,
-                    correspondent: correspondentValue || undefined
-                })
-            })
-            .then(response => {
+            const askTimeoutMs = 125000;
+            const requestController = typeof AbortController === 'function' ? new AbortController() : null;
+            let timeoutId = null;
+            let timedOut = false;
+
+            try {
+                const requestPromise = fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        question: questionText,
+                        useAI: useAI,
+                        from_date: fromDate || undefined,
+                        to_date: toDate || undefined,
+                        correspondent: correspondentValue || undefined
+                    }),
+                    signal: requestController ? requestController.signal : undefined
+                });
+
+                const timeoutPromise = new Promise((_, reject) => {
+                    timeoutId = setTimeout(() => {
+                        timedOut = true;
+                        if (requestController) {
+                            requestController.abort();
+                        }
+                        const timeoutError = new Error(`Request timed out after ${Math.round(askTimeoutMs / 1000)} seconds`);
+                        timeoutError.name = 'TimeoutError';
+                        reject(timeoutError);
+                    }, askTimeoutMs);
+                });
+
+                const response = await Promise.race([requestPromise, timeoutPromise]);
+
                 if (!response.ok) {
-                    throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+                    let responseError = `Server responded with ${response.status}: ${response.statusText}`;
+                    try {
+                        const errorPayload = await response.json();
+                        if (errorPayload && typeof errorPayload.error === 'string' && errorPayload.error.trim()) {
+                            responseError = errorPayload.error;
+                        }
+                    } catch (parseError) {
+                        // Keep default response error when no JSON body is returned.
+                    }
+                    throw new Error(responseError);
                 }
-                return response.json();
-            })
-            .then(data => {
-                // Hide typing indicator
-                typingIndicator.classList.add('hidden');
-                
+
+                const data = await response.json();
+
                 // Display answer with sources
                 addAssistantMessage(data.answer, data.sources, data.model);
                 
                 // Update connection status
                 isConnected = true;
                 updateStatusIndicator('online', 'Online');
-            })
-            .catch(error => {
-                // Hide typing indicator
-                typingIndicator.classList.add('hidden');
-                
+            } catch (error) {
+                const timeoutErrorName = error && typeof error.name === 'string' ? error.name : '';
+                const timedOutRequest = timedOut || (requestController && requestController.signal.aborted) || timeoutErrorName === 'AbortError' || timeoutErrorName === 'TimeoutError';
+
                 // Show error message
-                showError(`Error: ${error.message}`);
+                showError(
+                    timedOutRequest
+                        ? `Error: Request timed out after ${Math.round(askTimeoutMs / 1000)} seconds. Please try again.`
+                        : `Error: ${error.message}`
+                );
                 
                 // Update connection status if there was an error
                 isConnected = false;
@@ -1107,7 +1136,13 @@
                 
                 // Schedule an immediate status check
                 setTimeout(checkStatus, 1000);
-            });
+            } finally {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
+                // Hide typing indicator
+                typingIndicator.classList.add('hidden');
+            }
         }
 
         function addUserMessage(message) {
