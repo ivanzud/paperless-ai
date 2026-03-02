@@ -1,6 +1,53 @@
 const tiktoken = require('tiktoken');
 const fs = require('fs').promises;
 const path = require('path');
+const { TextDecoder } = require('util');
+
+function normalizeTextInput(value) {
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (value == null) {
+        return '';
+    }
+    if (Buffer.isBuffer(value)) {
+        return value.toString('utf8');
+    }
+    if (value instanceof Uint8Array) {
+        return Buffer.from(value).toString('utf8');
+    }
+    if (ArrayBuffer.isView(value)) {
+        return Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('utf8');
+    }
+    if (value instanceof ArrayBuffer) {
+        return Buffer.from(value).toString('utf8');
+    }
+    if (typeof value === 'object') {
+        try {
+            return JSON.stringify(value);
+        } catch (_error) {
+            return String(value);
+        }
+    }
+    return String(value);
+}
+
+function decodeTokenizerOutput(decodedValue) {
+    if (typeof decodedValue === 'string') {
+        return decodedValue;
+    }
+    if (decodedValue instanceof Uint8Array) {
+        return new TextDecoder('utf-8').decode(decodedValue);
+    }
+    if (ArrayBuffer.isView(decodedValue)) {
+        const bytes = new Uint8Array(decodedValue.buffer, decodedValue.byteOffset, decodedValue.byteLength);
+        return new TextDecoder('utf-8').decode(bytes);
+    }
+    if (decodedValue instanceof ArrayBuffer) {
+        return new TextDecoder('utf-8').decode(new Uint8Array(decodedValue));
+    }
+    return normalizeTextInput(decodedValue);
+}
 
 // Map non-OpenAI models to compatible OpenAI encodings or use estimation
 function getCompatibleModel(model) {
@@ -48,18 +95,19 @@ function estimateTokensForNonOpenAI(text) {
 
 // Calculate tokens for a given text
 async function calculateTokens(text, model = process.env.OPENAI_MODEL || "gpt-4o-mini") {
+    const normalizedText = normalizeTextInput(text);
     try {
         const compatibleModel = getCompatibleModel(model);
         
         if (!compatibleModel) {
             // Non-OpenAI model - use character-based estimation
             console.log(`[DEBUG] Using character-based token estimation for model: ${model}`);
-            return estimateTokensForNonOpenAI(text);
+            return estimateTokensForNonOpenAI(normalizedText);
         }
         
         // OpenAI model - use tiktoken
         const tokenizer = tiktoken.encoding_for_model(compatibleModel);
-        const tokens = tokenizer.encode(text);
+        const tokens = tokenizer.encode(normalizedText);
         const tokenCount = tokens.length;
         tokenizer.free();
         
@@ -67,7 +115,7 @@ async function calculateTokens(text, model = process.env.OPENAI_MODEL || "gpt-4o
         
     } catch (error) {
         console.warn(`[WARNING] Tiktoken failed for model ${model}, falling back to character estimation:`, error.message);
-        return estimateTokensForNonOpenAI(text);
+        return estimateTokensForNonOpenAI(normalizedText);
     }
 }
 
@@ -94,6 +142,7 @@ async function calculateTotalPromptTokens(systemPrompt, additionalPrompts = [], 
 
 // Truncate text to fit within token limit
 async function truncateToTokenLimit(text, maxTokens, model = process.env.OPENAI_MODEL || "gpt-4o-mini") {
+    const normalizedText = normalizeTextInput(text);
     try {
         const compatibleModel = getCompatibleModel(model);
         
@@ -101,15 +150,15 @@ async function truncateToTokenLimit(text, maxTokens, model = process.env.OPENAI_
             // Non-OpenAI model - use character-based estimation
             console.log(`[DEBUG] Using character-based truncation for model: ${model}`);
             
-            const estimatedTokens = estimateTokensForNonOpenAI(text);
+            const estimatedTokens = estimateTokensForNonOpenAI(normalizedText);
             
             if (estimatedTokens <= maxTokens) {
-                return text;
+                return normalizedText;
             }
             
             // Truncate based on character estimation (conservative approach)
             const maxChars = maxTokens * 4; // 4 chars per token approximation
-            const truncatedText = text.substring(0, maxChars);
+            const truncatedText = normalizedText.substring(0, maxChars);
             
             // Try to break at a word boundary if possible
             const lastSpaceIndex = truncatedText.lastIndexOf(' ');
@@ -122,32 +171,31 @@ async function truncateToTokenLimit(text, maxTokens, model = process.env.OPENAI_
         
         // OpenAI model - use tiktoken
         const tokenizer = tiktoken.encoding_for_model(compatibleModel);
-        const tokens = tokenizer.encode(text);
+        const tokens = tokenizer.encode(normalizedText);
       
         if (tokens.length <= maxTokens) {
             tokenizer.free();
-            return text;
+            return normalizedText;
         }
       
         const truncatedTokens = tokens.slice(0, maxTokens);
-        const truncatedText = tokenizer.decode(truncatedTokens);
+        const truncatedText = decodeTokenizerOutput(tokenizer.decode(truncatedTokens));
         tokenizer.free();
-        
-        // No need for TextDecoder here, tiktoken.decode() returns a string
+
         return truncatedText;
         
     } catch (error) {
         console.warn(`[WARNING] Token truncation failed for model ${model}, falling back to character estimation:`, error.message);
         
         // Fallback to character-based estimation
-        const estimatedTokens = estimateTokensForNonOpenAI(text);
+        const estimatedTokens = estimateTokensForNonOpenAI(normalizedText);
         
         if (estimatedTokens <= maxTokens) {
-            return text;
+            return normalizedText;
         }
         
         const maxChars = maxTokens * 4;
-        const truncatedText = text.substring(0, maxChars);
+        const truncatedText = normalizedText.substring(0, maxChars);
         
         // Try to break at a word boundary if possible
         const lastSpaceIndex = truncatedText.lastIndexOf(' ');
