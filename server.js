@@ -186,51 +186,53 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
   if (isProcessed) return null;
   await documentModel.setProcessingStatus(doc.id, doc.title, 'processing');
 
-  //Check if the Document can be edited
-  const documentEditable = await paperlessService.getPermissionOfDocument(doc.id);
-  if (!documentEditable) {
-    console.log(`[DEBUG] Document belongs to: ${documentEditable}, skipping analysis`);
-    console.log(`[DEBUG] Document ${doc.id} Not Editable by Paper-Ai User, skipping analysis`);
-    return null;
-  }else {
-    console.log(`[DEBUG] Document ${doc.id} rights for AI User - processed`);
-  }
+  try {
+    //Check if the Document can be edited
+    const documentEditable = await paperlessService.getPermissionOfDocument(doc.id);
+    if (!documentEditable) {
+      console.log(`[DEBUG] Document belongs to: ${documentEditable}, skipping analysis`);
+      console.log(`[DEBUG] Document ${doc.id} Not Editable by Paper-Ai User, skipping analysis`);
+      await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
+      return null;
+    }else {
+      console.log(`[DEBUG] Document ${doc.id} rights for AI User - processed`);
+    }
 
-  let [content, originalData] = await Promise.all([
-    paperlessService.getDocumentContent(doc.id),
-    paperlessService.getDocument(doc.id)
-  ]);
+    let [content, originalData] = await Promise.all([
+      paperlessService.getDocumentContent(doc.id),
+      paperlessService.getDocument(doc.id)
+    ]);
 
-  const noContent = !content || !content.length >= 10;
-  if (noContent) {
-    if (config.aiProvider !== 'gemini') {
+    if (!content || content.length < 10) {
       console.log(`[DEBUG] Document ${doc.id} has no content, skipping analysis`);
+      await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
       return null;
     }
-    console.log(`[DEBUG] Document ${doc.id} has no content, but Gemini will extract text directly from PDF`);
-    content = '';
-  }
 
-  if (content.length > 50000) {
-    content = content.substring(0, 50000);
-  }
+    if (content.length > 50000) {
+      content = content.substring(0, 50000);
+    }
 
-  const aiService = AIServiceFactory.getService();
-  const options = noContent ? { extractContent: true } : {};
-  const analysis = await aiService.analyzeDocument(content, existingTags, existingCorrespondentList, existingDocumentTypesList, doc.id, null, options);
-  console.log('Response from AI service:', JSON.stringify(analysis.document));
-  if (analysis.error) {
-    throw new Error(`[ERROR] Document analysis failed: ${analysis.error}`);
+    const aiService = AIServiceFactory.getService();
+    const analysis = await aiService.analyzeDocument(content, existingTags, existingCorrespondentList, existingDocumentTypesList, doc.id);
+    console.log('Repsonse from AI service:', analysis);
+    if (analysis.warnings?.length) {
+      console.warn(`[WARNING] Document ${doc.id} analyzed with partial chunk failures:`, analysis.warnings);
+    }
+    if (analysis.error) {
+      console.error(`[ERROR] Detailed analysis error for document ${doc.id}:`, {
+        message: analysis.error,
+        details: analysis.errorDetails || null,
+        warnings: analysis.warnings || []
+      });
+      throw new Error(`[ERROR] Document analysis failed: ${analysis.error}`);
+    }
+    await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
+    return { analysis, originalData };
+  } catch (error) {
+    await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
+    throw error;
   }
-
-  if (analysis.document.extracted_content) {
-    console.log(`[DEBUG] Writing extracted content back to Paperless for document ${doc.id}`);
-    await paperlessService.updateDocumentContent(doc.id, analysis.document.extracted_content);
-    delete analysis.document.extracted_content;
-  }
-
-  await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
-  return { analysis, originalData };
 }
 
 async function buildUpdateData(analysis, doc) {
@@ -423,6 +425,9 @@ async function scanInitial() {
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, error);
+        if (error?.stack) {
+          console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
+        }
       }
     }
   } catch (error) {
@@ -465,6 +470,9 @@ async function scanDocuments() {
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, error);
+        if (error?.stack) {
+          console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
+        }
       }
     }
   } catch (error) {
