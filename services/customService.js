@@ -667,6 +667,10 @@ class CustomOpenAIService {
       }
 
       const model = config.custom.model;
+      const configuredResponseTokens = Number(config.responseTokens);
+      const maxTokens = Number.isFinite(configuredResponseTokens) && configuredResponseTokens > 0
+        ? configuredResponseTokens
+        : 1000;
 
       const response = await this.client.chat.completions.create({
         model: model,
@@ -677,7 +681,7 @@ class CustomOpenAIService {
           }
         ],
         temperature: 0.7,
-        max_tokens: 128000
+        max_tokens: maxTokens
       });
 
       if (!response?.choices?.[0]?.message?.content) {
