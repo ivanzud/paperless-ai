@@ -9,6 +9,9 @@ const parseEnvBoolean = (value, defaultValue = 'yes') => {
   if (!value) return defaultValue;
   return value.toLowerCase() === 'true' || value === '1' || value.toLowerCase() === 'yes' ? 'yes' : 'no';
 };
+const normalizePaperlessBaseUrl = (url) => (url || '').replace(/\/+$/, '').replace(/\/api\/?$/, '');
+const paperlessApiUrl = process.env.PAPERLESS_API_URL || '';
+const paperlessExternalUrl = normalizePaperlessBaseUrl(process.env.PAPERLESS_EXTERNAL_URL || paperlessApiUrl);
 
 // Initialize limit functions with defaults
 const limitFunctions = {
@@ -45,6 +48,7 @@ const externalApiConfig = {
 
 console.log('Loaded environment variables:', {
   PAPERLESS_API_URL: process.env.PAPERLESS_API_URL,
+  PAPERLESS_EXTERNAL_URL: process.env.PAPERLESS_EXTERNAL_URL || '(fallback to PAPERLESS_API_URL)',
   PAPERLESS_API_TOKEN: '******',
   LIMIT_FUNCTIONS: limitFunctions,
   AI_RESTRICTIONS: aiRestrictions,
@@ -68,7 +72,8 @@ module.exports = {
   // External API config
   externalApiConfig: externalApiConfig,
   paperless: {
-    apiUrl: process.env.PAPERLESS_API_URL,
+    apiUrl: paperlessApiUrl,
+    externalUrl: paperlessExternalUrl,
     apiToken: process.env.PAPERLESS_API_TOKEN
   },
   openai: {

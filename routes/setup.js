@@ -141,6 +141,17 @@ let PUBLIC_ROUTES = [
   '/logout'
 ];
 
+const normalizePaperlessBaseUrl = (url) => (url || '').replace(/\/+$/, '').replace(/\/api\/?$/, '');
+
+const getPaperlessExternalBaseUrl = () => {
+  const externalUrl = normalizePaperlessBaseUrl(process.env.PAPERLESS_EXTERNAL_URL || '');
+  if (externalUrl) {
+    return externalUrl;
+  }
+
+  return normalizePaperlessBaseUrl(process.env.PAPERLESS_API_URL || '');
+};
+
 // Combined middleware to check authentication and setup
 router.use(async (req, res, next) => {
   const token = req.cookies.jwt || req.headers.authorization?.split(' ')[1];
@@ -1244,12 +1255,12 @@ router.get('/api/history', async (req, res) => {
     const allDocs = await documentModel.getAllHistory();
     const allTags = await paperlessService.getTags();
     const tagMap = new Map(allTags.map(tag => [tag.id, tag]));
+    const externalPaperlessUrl = getPaperlessExternalBaseUrl();
 
     // Format and filter documents
     let filteredDocs = allDocs.map(doc => {
       const tagIds = doc.tags === '[]' ? [] : JSON.parse(doc.tags || '[]');
       const resolvedTags = tagIds.map(id => tagMap.get(parseInt(id))).filter(Boolean);
-      const baseURL = process.env.PAPERLESS_API_URL.replace(/\/api$/, '');
 
       resolvedTags.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1259,7 +1270,7 @@ router.get('/api/history', async (req, res) => {
         created_at: doc.created_at,
         tags: resolvedTags,
         correspondent: doc.correspondent || 'Not assigned',
-        link: `${baseURL}/documents/${doc.document_id}/`
+        link: `${externalPaperlessUrl}/documents/${doc.document_id}/`
       };
     }).filter(doc => {
       const matchesSearch = !search || 
@@ -1944,6 +1955,7 @@ router.get('/setup', async (req, res) => {
     // Base configuration object - load this FIRST, before any checks
     let config = {
       PAPERLESS_API_URL: (process.env.PAPERLESS_API_URL || 'http://localhost:8000').replace(/\/api$/, ''),
+      PAPERLESS_EXTERNAL_URL: normalizePaperlessBaseUrl(process.env.PAPERLESS_EXTERNAL_URL || ''),
       PAPERLESS_API_TOKEN: process.env.PAPERLESS_API_TOKEN || '',
       PAPERLESS_USERNAME: process.env.PAPERLESS_USERNAME || '',
       AI_PROVIDER: process.env.AI_PROVIDER || 'openai',
@@ -1984,6 +1996,9 @@ router.get('/setup', async (req, res) => {
       const savedConfig = await setupService.loadConfig();
       if (savedConfig.PAPERLESS_API_URL) {
         savedConfig.PAPERLESS_API_URL = savedConfig.PAPERLESS_API_URL.replace(/\/api$/, '');
+      }
+      if (savedConfig.PAPERLESS_EXTERNAL_URL) {
+        savedConfig.PAPERLESS_EXTERNAL_URL = normalizePaperlessBaseUrl(savedConfig.PAPERLESS_EXTERNAL_URL);
       }
 
       savedConfig.TAGS = normalizeArray(savedConfig.TAGS);
@@ -2803,6 +2818,7 @@ router.get('/settings', async (req, res) => {
   }
   let config = {
     PAPERLESS_API_URL: (process.env.PAPERLESS_API_URL || 'http://localhost:8000').replace(/\/api$/, ''),
+    PAPERLESS_EXTERNAL_URL: normalizePaperlessBaseUrl(process.env.PAPERLESS_EXTERNAL_URL || ''),
     PAPERLESS_API_TOKEN: process.env.PAPERLESS_API_TOKEN || '',
     PAPERLESS_USERNAME: process.env.PAPERLESS_USERNAME || '',
     AI_PROVIDER: process.env.AI_PROVIDER || 'openai',
@@ -2849,6 +2865,9 @@ router.get('/settings', async (req, res) => {
     const savedConfig = await setupService.loadConfig();
     if (savedConfig.PAPERLESS_API_URL) {
       savedConfig.PAPERLESS_API_URL = savedConfig.PAPERLESS_API_URL.replace(/\/api$/, '');
+    }
+    if (savedConfig.PAPERLESS_EXTERNAL_URL) {
+      savedConfig.PAPERLESS_EXTERNAL_URL = normalizePaperlessBaseUrl(savedConfig.PAPERLESS_EXTERNAL_URL);
     }
 
     savedConfig.TAGS = normalizeArray(savedConfig.TAGS);
@@ -3850,6 +3869,7 @@ router.post('/setup', express.json(), async (req, res) => {
     // Prepare base config
     const config = {
       PAPERLESS_API_URL: paperlessApiUrl,
+      PAPERLESS_EXTERNAL_URL: normalizePaperlessBaseUrl(process.env.PAPERLESS_EXTERNAL_URL || ''),
       PAPERLESS_API_TOKEN: paperlessToken,
       PAPERLESS_USERNAME: paperlessUsername,
       AI_PROVIDER: aiProvider,
@@ -4189,6 +4209,7 @@ router.post('/settings', express.json(), async (req, res) => {
 
     const currentConfig = {
       PAPERLESS_API_URL: process.env.PAPERLESS_API_URL || '',
+      PAPERLESS_EXTERNAL_URL: process.env.PAPERLESS_EXTERNAL_URL || '',
       PAPERLESS_API_TOKEN: process.env.PAPERLESS_API_TOKEN || '',
       PAPERLESS_USERNAME: process.env.PAPERLESS_USERNAME || '',
       AI_PROVIDER: process.env.AI_PROVIDER || '',
@@ -4534,9 +4555,8 @@ router.get('/dashboard/doc/:id', async (req, res) => {
   }
   try {
     // Redirect to paperless-ngx and show detail page of the document (for example https://paperless.example.com/documents/887/details)
-    const paperlessUrl = process.env.PAPERLESS_API_URL;
-    const paperlessUrlWithoutApi = paperlessUrl.replace('/api', '');
-    const redirectUrl = `${paperlessUrlWithoutApi}/documents/${docId}/details`;
+    const paperlessUrl = getPaperlessExternalBaseUrl();
+    const redirectUrl = `${paperlessUrl}/documents/${docId}/details`;
     console.log('Redirecting to Paperless-ngx URL:', redirectUrl);
     res.redirect(redirectUrl);
   } catch (error) {
