@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import hashlib
+import re
 import numpy as np
 import pickle
 from datetime import datetime
@@ -64,6 +65,27 @@ COLLECTION_NAME = "documents"
 BM25_WEIGHT = 0.3
 SEMANTIC_WEIGHT = 0.7
 MAX_RESULTS = 20
+MAX_CONTEXT_RESULTS = 100
+COUNT_QUERY_PATTERNS = [
+    r"\bhow many\b",
+    r"\bnumber of\b",
+    r"\bcount\b",
+    r"\btotal\b",
+    r"\bwie viele\b",
+    r"\banzahl\b",
+    r"\bcombien\b",
+    r"\bcu[aá]nt[oa]s?\b",
+    r"\bquant[ioe]\b",
+]
+
+
+def is_coverage_query(question: str) -> bool:
+    """Detect questions that need broader retrieval coverage."""
+    if not question:
+        return False
+
+    normalized = " ".join(question.lower().split())
+    return any(re.search(pattern, normalized) for pattern in COUNT_QUERY_PATTERNS)
 
 def _parse_bool_env(var_name: str, default: bool) -> bool:
     value = os.getenv(var_name)
@@ -111,6 +133,7 @@ class SearchRequest(BaseModel):
     from_date: Optional[str] = None
     to_date: Optional[str] = None
     correspondent: Optional[str] = None
+    limit: Optional[int] = None
 
 class IndexingRequest(BaseModel):
     force: bool = False
@@ -118,7 +141,7 @@ class IndexingRequest(BaseModel):
 
 class AskQuestionRequest(BaseModel):
     question: str
-    max_sources: int = 5
+    max_sources: int = Field(default=5, ge=1, le=MAX_CONTEXT_RESULTS)
 
 # Response models
 class SearchResult(BaseModel):
@@ -1315,11 +1338,15 @@ class SearchEngine:
                 raise Exception("Search engine could not be initialized")
             
         query = request.query
+        requested_limit = request.limit if request.limit is not None else MAX_RESULTS
+        if requested_limit < 1:
+            requested_limit = MAX_RESULTS
+        top_k = min(requested_limit, MAX_CONTEXT_RESULTS)
         logger.info(f"Performing search for: '{query}'")
         
         try:
             # Perform hybrid search
-            results = self.hybrid_search(query)
+            results = self.hybrid_search(query, top_k=top_k)
             
             # Check if we got valid results
             if not results:
@@ -1365,7 +1392,7 @@ class SearchEngine:
                 return []
                 
             # Rerank results
-            reranked_results = self.rerank_results(query, results)
+            reranked_results = self.rerank_results(query, results, top_k=top_k)
             
             # Format results
             formatted_results = []
@@ -1757,6 +1784,13 @@ async def get_context(request: AskQuestionRequest, search_engine: SearchEngine =
     """Get context for a question without answering it"""
     try:
         logger.info(f"Context request: {request.question}")
+        coverage_mode = "broad" if is_coverage_query(request.question) else "focused"
+        requested_max_sources = max(1, request.max_sources)
+        search_limit = max(MAX_RESULTS, requested_max_sources)
+
+        if coverage_mode == "broad":
+            # Count/total questions need broader retrieval to avoid inferring totals from tiny samples.
+            search_limit = min(MAX_CONTEXT_RESULTS, max(search_limit, requested_max_sources * 4))
         
         # Validate search engine state before using
         if not search_engine.is_initialized or not search_engine.validate_state():
@@ -1764,7 +1798,9 @@ async def get_context(request: AskQuestionRequest, search_engine: SearchEngine =
             search_engine.initialize(force_update=False)
         
         # Search for relevant documents
-        search_results = search_engine.search(SearchRequest(query=request.question))
+        search_results = search_engine.search(
+            SearchRequest(query=request.question, limit=search_limit)
+        )
         
         # Check if we got any results
         if not search_results or len(search_results) == 0:
@@ -1772,15 +1808,29 @@ async def get_context(request: AskQuestionRequest, search_engine: SearchEngine =
             return {
                 "context": "No relevant documents found.",
                 "sources": [],
-                "query": request.question
+                "query": request.question,
+                "total_matches": 0,
+                "coverage_mode": coverage_mode,
+                "search_limit": search_limit,
+                "result_cap_hit": False,
             }
         
+        total_matches = len(search_results)
+        max_sources = min(requested_max_sources, total_matches)
+        result_cap_hit = coverage_mode == "broad" and total_matches >= search_limit
+
         # Make sure we don't exceed the requested max sources
-        max_sources = min(request.max_sources, len(search_results))
-        
-        # Prepare sources
+        # Prepare sources and embed retrieval metadata to anchor LLM reasoning.
         sources = []
-        context = ""
+        context = (
+            f"Retrieved document matches: {total_matches}\n"
+            f"Coverage mode: {coverage_mode}\n"
+            f"Result cap reached: {'yes' if result_cap_hit else 'no'}\n"
+        )
+        if coverage_mode == "broad":
+            context += "Use the retrieved match count for total/count questions.\n\n"
+        else:
+            context += "\n"
         
         for i, result in enumerate(search_results[:max_sources]):
             # Validate the result before using
@@ -1800,7 +1850,11 @@ async def get_context(request: AskQuestionRequest, search_engine: SearchEngine =
         return {
             "context": context,
             "sources": sources,
-            "query": request.question
+            "query": request.question,
+            "total_matches": total_matches,
+            "coverage_mode": coverage_mode,
+            "search_limit": search_limit,
+            "result_cap_hit": result_cap_hit,
         }
     except Exception as e:
         logger.error(f"Context error: {str(e)}")

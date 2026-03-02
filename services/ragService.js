@@ -4,6 +4,21 @@ const config = require('../config/config');
 const AIServiceFactory = require('./aiServiceFactory');
 const paperlessService = require('./paperlessService');
 
+const DEFAULT_MAX_SOURCES = 5;
+const BROAD_MAX_SOURCES = 40;
+const MAX_ALLOWED_SOURCES = 100;
+const COVERAGE_QUERY_PATTERNS = [
+  /\bhow many\b/i,
+  /\bnumber of\b/i,
+  /\bcount\b/i,
+  /\btotal\b/i,
+  /\bwie viele\b/i,
+  /\banzahl\b/i,
+  /\bcombien\b/i,
+  /\bcu[aá]nt[oa]s?\b/i,
+  /\bquant[ioe]\b/i
+];
+
 class RagService {
   constructor() {
     this.baseUrl = process.env.RAG_SERVICE_URL || 'http://localhost:8000';
@@ -30,8 +45,20 @@ class RagService {
         .catch((error) => {
           clearTimeout(timeoutId);
           reject(error);
-        });
+      });
     });
+  }
+
+  isCoverageQuestion(question = '') {
+    return COVERAGE_QUERY_PATTERNS.some((pattern) => pattern.test(question));
+  }
+
+  resolveMaxSources(question, requestedMaxSources) {
+    const parsedRequestedSources = Number.parseInt(requestedMaxSources, 10);
+    const hasRequestedSources = Number.isInteger(parsedRequestedSources) && parsedRequestedSources > 0;
+    const baseValue = this.isCoverageQuestion(question) ? BROAD_MAX_SOURCES : DEFAULT_MAX_SOURCES;
+    const resolvedValue = hasRequestedSources ? parsedRequestedSources : baseValue;
+    return Math.min(Math.max(resolvedValue, 1), MAX_ALLOWED_SOURCES);
   }
 
   /**
@@ -78,8 +105,10 @@ class RagService {
    * @param {string} question - The question to ask
    * @returns {Promise<{answer: string, sources: Array}>} - AI response and source documents
    */
-  async askQuestion(question) {
+  async askQuestion(question, options = {}) {
     try {
+      const coverageQuestion = this.isCoverageQuestion(question);
+      const maxSources = this.resolveMaxSources(question, options.maxSources);
       const contextTimeoutMs = this.parseTimeoutMs(process.env.RAG_CONTEXT_TIMEOUT_MS, 30000);
       // 1. Get context from the RAG service
       const response = await this.withTimeout(
@@ -87,7 +116,7 @@ class RagService {
           `${this.baseUrl}/context`,
           {
             question,
-            max_sources: 5
+            max_sources: maxSources
           },
           { timeout: contextTimeoutMs }
         ),
@@ -95,12 +124,20 @@ class RagService {
         `RAG context request timed out after ${contextTimeoutMs}ms`
       );
       
-      const { context, sources } = response.data;
+      const {
+        context,
+        sources = [],
+        total_matches: totalMatches,
+        coverage_mode: coverageMode,
+        search_limit: searchLimit,
+        result_cap_hit: resultCapHit
+      } = response.data;
       
       // 2. Fetch full content for each source document using doc_id
       let enhancedContext = context;
+      const shouldFetchFullContent = !coverageQuestion;
       
-      if (sources && sources.length > 0) {
+      if (shouldFetchFullContent && sources.length > 0) {
         // Fetch full document content for each source
         const fullDocContents = await Promise.all(
           sources.map(async (source) => {
@@ -120,6 +157,12 @@ class RagService {
         // Combine original context with full document contents
         enhancedContext = context + '\n\n' + fullDocContents.filter(content => content).join('\n\n');
       }
+
+      const resolvedCoverageMode = coverageMode || (coverageQuestion ? 'broad' : 'focused');
+      const retrievedMatchCount = Number.isInteger(totalMatches) ? totalMatches : sources.length;
+      const sourceCount = sources.length;
+      const retrievalCapped = resultCapHit === true;
+      const retrievalLimit = Number.isInteger(searchLimit) && searchLimit > 0 ? searchLimit : null;
       
       // 3. Use AI service to generate an answer based on the enhanced context
       const aiService = AIServiceFactory.getService();
@@ -133,11 +176,20 @@ class RagService {
 
         Question: ${question}
 
+        Retrieval metadata:
+        - Coverage mode: ${resolvedCoverageMode}
+        - Matching documents in retrieval set: ${retrievedMatchCount}
+        - Sources included in context: ${sourceCount}
+        - Retrieval limit reached: ${retrievalCapped ? 'yes' : 'no'}
+        ${retrievalLimit ? `- Retrieval limit: ${retrievalLimit}` : ''}
+
         Context from relevant documents:
         ${enhancedContext}
 
         Important instructions:
         - Use ONLY information from the provided documents
+        - For questions about totals, counts, or "how many", use "Matching documents in retrieval set" as the authoritative number
+        - If "Retrieval limit reached" is "yes" and the user asks for a total, clearly answer as "at least" that number
         - If the answer is not contained in the documents, respond: "This information is not contained in the documents." (in the same language as the question)
         - Avoid assumptions or speculation beyond the given context
         - Answer in the same language as the question was asked
@@ -162,7 +214,13 @@ class RagService {
       
       return {
         answer,
-        sources
+        sources,
+        coverage: {
+          mode: resolvedCoverageMode,
+          total_matches: retrievedMatchCount,
+          sources_returned: sourceCount,
+          result_cap_hit: retrievalCapped
+        }
       };
     } catch (error) {
       console.error('Error in askQuestion:', error);

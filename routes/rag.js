@@ -57,7 +57,7 @@ router.post('/search', async (req, res) => {
  */
 router.post('/ask', async (req, res) => {
   try {
-    const { question } = req.body;
+    const { question, max_sources } = req.body;
     
     if (!question) {
       return res.status(400).json({ error: 'Question is required' });
@@ -65,7 +65,7 @@ router.post('/ask', async (req, res) => {
 
     const askTimeoutMs = parseTimeoutMs(process.env.RAG_ASK_TIMEOUT_MS, 125000);
     const result = await withTimeout(
-      ragService.askQuestion(question),
+      ragService.askQuestion(question, { maxSources: max_sources }),
       askTimeoutMs,
       `RAG chat request timed out after ${Math.round(askTimeoutMs / 1000)} seconds`
     );
