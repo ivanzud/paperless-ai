@@ -184,16 +184,20 @@ class OllamaService {
      */
     async analyzePlayground(content, prompt) {
         try {
-            // Calculate context window size
-            const promptTokenCount = await calculateTokens(prompt);
-            const numCtx = this._calculateNumCtx(promptTokenCount, 1024);
-
             // Generate playground system prompt (simpler than full analysis)
             const systemPrompt = this._generatePlaygroundSystemPrompt();
+            const contentText = typeof content === 'string' ? content : JSON.stringify(content);
+
+            // Calculate context size from the full request payload, not prompt alone.
+            const promptTokenCount = await calculateTokens(prompt);
+            const contentTokenCount = await calculateTokens(contentText);
+            const systemTokenCount = await calculateTokens(systemPrompt);
+            const totalRequestTokens = promptTokenCount + contentTokenCount + systemTokenCount;
+            const numCtx = this._calculateNumCtx(totalRequestTokens, 1024);
 
             // Call Ollama API
             const response = await this._callOllamaAPI(
-                prompt + "\n\n" + JSON.stringify(content),
+                `${prompt}\n\n${contentText}`,
                 systemPrompt,
                 numCtx,
                 this.playgroundSchema
