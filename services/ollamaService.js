@@ -590,6 +590,22 @@ class OllamaService {
      * @returns {Object} Parsed response
      */
     _processOllamaResponse(responseData) {
+        const emptyAnalysis = {
+            tags: [],
+            correspondent: null,
+            title: null,
+            document_date: null,
+            document_type: null,
+            language: null,
+            notes: null,
+            custom_fields: null
+        };
+
+        if (!responseData || typeof responseData !== 'object') {
+            console.warn('[WARNING] Ollama response payload is missing or invalid, returning empty analysis.');
+            return emptyAnalysis;
+        }
+
         // Check if we got a structured response or need to parse from text
         if (responseData.response && typeof responseData.response === 'object') {
             // We got a structured response directly
@@ -604,12 +620,26 @@ class OllamaService {
                     notes: responseData.response.notes || null,
                     custom_fields: responseData.response.custom_fields || null
                 };
-        } else if (responseData.response) {
+        } else if (typeof responseData.response === 'string' && responseData.response.trim()) {
             // Fall back to parsing from text response
             console.log('Falling back to text response parsing');
             return this._parseResponse(responseData.response);
         } else {
-            throw new Error('No response data from Ollama API');
+            const fallbackTextResponse = [
+                responseData.message?.content,
+                responseData.output,
+                responseData.reasoning,
+                responseData.thinking
+            ].find((value) => typeof value === 'string' && value.trim());
+
+            if (fallbackTextResponse) {
+                console.warn('[WARNING] Ollama response is missing `response`; attempting fallback text fields.');
+                return this._parseResponse(fallbackTextResponse);
+            }
+
+            const responseKeys = Object.keys(responseData);
+            console.warn(`[WARNING] Ollama response missing parsable payload. Response keys: ${responseKeys.length ? responseKeys.join(', ') : 'none'}. Returning empty analysis.`);
+            return emptyAnalysis;
         }
     }
 
