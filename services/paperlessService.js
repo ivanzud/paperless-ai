@@ -1495,7 +1495,15 @@ async getOrCreateDocumentType(name, options = {}) {
           }
 
           if (isValid(dateObject)) {
-            updateData.created = format(dateObject, 'yyyy-MM-dd');
+            const normalizedCreated = format(dateObject, 'yyyy-MM-dd');
+            const today = format(new Date(), 'yyyy-MM-dd');
+
+            if (normalizedCreated > today) {
+              console.warn(`[WARN] Future created date received (${normalizedCreated}), skipping created date update`);
+              delete updateData.created;
+            } else {
+              updateData.created = normalizedCreated;
+            }
           } else {
             console.warn(`[WARN] Invalid date format: ${updates.created}, skipping created date update`);
             delete updateData.created;
