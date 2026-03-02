@@ -32,6 +32,21 @@ class ManualService {
         }
     }
 
+    _normalizeNotesField(parsedResponse) {
+        if (!parsedResponse || typeof parsedResponse !== 'object') return parsedResponse;
+        if (parsedResponse.notes == null && parsedResponse.note != null) {
+            parsedResponse.notes = parsedResponse.note;
+        }
+        if (
+            parsedResponse.notes != null &&
+            !Array.isArray(parsedResponse.notes) &&
+            typeof parsedResponse.notes !== 'string'
+        ) {
+            parsedResponse.notes = String(parsedResponse.notes);
+        }
+        return parsedResponse;
+    }
+
     
     async analyzeDocument(content, existingTags, provider) {
         try {
@@ -48,7 +63,7 @@ class ManualService {
         }
         } catch (error) {
         console.error('Error analyzing document:', error);
-        return { tags: [], correspondent: null };
+        return { tags: [], correspondent: null, notes: null };
         }
     }
     
@@ -78,9 +93,10 @@ class ManualService {
         let jsonContent = response.choices[0].message.content;
         jsonContent = jsonContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         
-        const parsedResponse = JSON.parse(jsonContent);
+        let parsedResponse = JSON.parse(jsonContent);
         try {
             parsedResponse = JSON.parse(jsonContent);
+            this._normalizeNotesField(parsedResponse);
             fs.appendFile('./logs/response.txt', jsonContent, (err) => {
                 if (err) throw err;
             });
@@ -96,7 +112,7 @@ class ManualService {
         return parsedResponse;
         } catch (error) {
         console.error('Failed to analyze document with OpenAI:', error);
-        return { tags: [], correspondent: null };
+        return { tags: [], correspondent: null, notes: null };
         }
     }
 
@@ -126,9 +142,10 @@ class ManualService {
         let jsonContent = response.choices[0].message.content;
         jsonContent = jsonContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         
-        const parsedResponse = JSON.parse(jsonContent);
+        let parsedResponse = JSON.parse(jsonContent);
         try {
             parsedResponse = JSON.parse(jsonContent);
+            this._normalizeNotesField(parsedResponse);
             fs.appendFile('./logs/response.txt', jsonContent, (err) => {
                 if (err) throw err;
             });
@@ -144,7 +161,7 @@ class ManualService {
         return parsedResponse;
         } catch (error) {
         console.error('Failed to analyze document with OpenAI:', error);
-        return { tags: [], correspondent: null };
+        return { tags: [], correspondent: null, notes: null };
         }
     }
 
@@ -174,7 +191,8 @@ class ManualService {
             let jsonContent = response.choices[0].message.content;
             jsonContent = jsonContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
             
-            const parsedResponse = JSON.parse(jsonContent);
+            let parsedResponse = JSON.parse(jsonContent);
+            this._normalizeNotesField(parsedResponse);
             
             if (!Array.isArray(parsedResponse.tags) || typeof parsedResponse.correspondent !== 'string') {
                 throw new Error('Invalid response structure');
@@ -183,7 +201,7 @@ class ManualService {
             return parsedResponse;
             } catch (error) {
             console.error('Failed to analyze document with OpenAI:', error);
-            return { tags: [], correspondent: null };
+            return { tags: [], correspondent: null, notes: null };
             }
     }
     

@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { parse, isValid, parseISO, format } = require('date-fns');
 
+const AI_NOTE_PREFIX = '[Paperless-AI]';
+
 class PaperlessService {
   constructor() {
     this.client = null;
@@ -952,6 +954,68 @@ class PaperlessService {
     }
   }
 
+  normalizeNoteText(note) {
+    if (!note) return '';
+    if (Array.isArray(note)) {
+      return '';
+    }
+    const text = String(note);
+    return text
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  extractNoteText(noteObj) {
+    if (!noteObj) return '';
+    if (typeof noteObj === 'string') return noteObj;
+    return noteObj.note || '';
+  }
+
+  isAiNoteText(text) {
+    return typeof text === 'string' && text.startsWith(AI_NOTE_PREFIX);
+  }
+
+  ensureAiPrefix(text) {
+    const normalized = this.normalizeNoteText(text);
+    if (!normalized) return '';
+    if (this.isAiNoteText(normalized)) return normalized;
+    return `${AI_NOTE_PREFIX} ${normalized}`;
+  }
+
+  _stripAiPrefix(text) {
+    if (!text) return '';
+    if (text.startsWith(AI_NOTE_PREFIX)) {
+      return text.slice(AI_NOTE_PREFIX.length).trimStart();
+    }
+    return text;
+  }
+
+  async getDocumentNotes(documentId) {
+    this.initialize();
+    try {
+      const response = await this.client.get(`/documents/${documentId}/`);
+      const notes = response?.data?.notes;
+      return Array.isArray(notes) ? notes : [];
+    } catch (error) {
+      console.error(`[ERROR] fetching notes for document ${documentId}:`, error.message);
+      return [];
+    }
+  }
+
+  async createDocumentNote(documentId, noteText) {
+    this.initialize();
+    try {
+      const payload = { note: noteText };
+      const response = await this.client.post(`/documents/${documentId}/notes/`, payload);
+      return response?.data || null;
+    } catch (error) {
+      console.error(`[ERROR] creating note for document ${documentId}:`, error.message);
+      return null;
+    }
+  }
+
   async searchForCorrespondentById(id) {
     try {
       const response = await this.client.get('/correspondents/', {
@@ -1266,6 +1330,48 @@ async getOrCreateDocumentType(name) {
     if (!this.client) return;
     try {
       const currentDoc = await this.getDocument(documentId);
+
+      if (Object.prototype.hasOwnProperty.call(updates, 'notes')) {
+        try {
+          const incomingNote = this.normalizeNoteText(updates.notes);
+          if (incomingNote) {
+            const existingNotesRaw = Array.isArray(currentDoc?.notes)
+              ? currentDoc.notes
+              : await this.getDocumentNotes(documentId);
+
+            const existingNotes = existingNotesRaw
+              .map(note => this.normalizeNoteText(this.extractNoteText(note)))
+              .filter(Boolean);
+
+            const aiNotes = existingNotes.filter(note => this.isAiNoteText(note));
+            const userNotes = existingNotes.filter(note => !this.isAiNoteText(note));
+
+            if (userNotes.length > 0) {
+              console.log(`[DEBUG] Document ${documentId} has user notes, skipping AI note creation`);
+            } else {
+              const normalizedIncoming = this.normalizeNoteText(this._stripAiPrefix(incomingNote));
+              const hasMatchingAiNote = aiNotes.some(note => {
+                const normalizedExisting = this.normalizeNoteText(this._stripAiPrefix(note));
+                return normalizedExisting === normalizedIncoming;
+              });
+
+              if (hasMatchingAiNote) {
+                console.log(`[DEBUG] AI note already exists for document ${documentId}, skipping creation`);
+              } else {
+                const noteToCreate = this.ensureAiPrefix(incomingNote);
+                if (noteToCreate) {
+                  await this.createDocumentNote(documentId, noteToCreate);
+                  console.log(`[SUCCESS] Created AI note for document ${documentId}`);
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(`[WARN] Failed to process notes for document ${documentId}:`, error.message);
+        }
+
+        delete updates.notes;
+      }
       
       if (updates.tags) {
         console.log(`[DEBUG] Current tags for document ${documentId}:`, currentDoc.tags);

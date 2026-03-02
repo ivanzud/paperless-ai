@@ -1721,6 +1721,13 @@ async function buildUpdateData(analysis, doc) {
     updateData.language = analysis.document.language;
   }
 
+  if (analysis.document.notes && typeof analysis.document.notes === 'string') {
+    const trimmedNotes = analysis.document.notes.trim();
+    if (trimmedNotes.length > 0) {
+      updateData.notes = trimmedNotes;
+    }
+  }
+
   return updateData;
 }
 
@@ -1728,7 +1735,7 @@ async function saveDocumentChanges(docId, updateData, analysis, originalData) {
   const { tags: originalTags, correspondent: originalCorrespondent, title: originalTitle } = originalData;
   
   await Promise.all([
-    documentModel.saveOriginalData(docId, originalTags, originalCorrespondent, originalTitle),
+    documentModel.saveOriginalData(docId, originalTags, originalCorrespondent, originalTitle, null),
     paperlessService.updateDocument(docId, updateData),
     documentModel.addProcessedDocument(docId, updateData.title),
     documentModel.addOpenAIMetrics(
@@ -1737,7 +1744,7 @@ async function saveDocumentChanges(docId, updateData, analysis, originalData) {
       analysis.metrics.completionTokens,
       analysis.metrics.totalTokens
     ),
-    documentModel.addToHistory(docId, updateData.tags, updateData.title, analysis.document.correspondent)
+    documentModel.addToHistory(docId, updateData.tags, updateData.title, analysis.document.correspondent, updateData.notes ?? null)
   ]);
 }
 

@@ -40,6 +40,7 @@ class OllamaService {
                 document_type: { type: "string" },
                 document_date: { type: "string" },
                 language: { type: "string" },
+                notes: { type: "string" },
                 custom_fields: {
                     type: "object",
                     additionalProperties: true
@@ -573,15 +574,16 @@ class OllamaService {
         if (responseData.response && typeof responseData.response === 'object') {
             // We got a structured response directly
             console.log('Using structured output response');
-            return {
-                tags: Array.isArray(responseData.response.tags) ? responseData.response.tags : [],
-                correspondent: responseData.response.correspondent || null,
-                title: responseData.response.title || null,
-                document_date: responseData.response.document_date || null,
-                document_type: responseData.response.document_type || null,
-                language: responseData.response.language || null,
-                custom_fields: responseData.response.custom_fields || null
-            };
+                return {
+                    tags: Array.isArray(responseData.response.tags) ? responseData.response.tags : [],
+                    correspondent: responseData.response.correspondent || null,
+                    title: responseData.response.title || null,
+                    document_date: responseData.response.document_date || null,
+                    document_type: responseData.response.document_type || null,
+                    language: responseData.response.language || null,
+                    notes: responseData.response.notes || null,
+                    custom_fields: responseData.response.custom_fields || null
+                };
         } else if (responseData.response) {
             // Fall back to parsing from text response
             console.log('Falling back to text response parsing');
@@ -619,6 +621,7 @@ class OllamaService {
                     document_date: result.document_date || null,
                     document_type: result.document_type || null,
                     language: result.language || null,
+                    notes: result.notes || null,
                     custom_fields: result.custom_fields || null
                 };
 
