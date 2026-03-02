@@ -1,0 +1,12 @@
+<script>
+  (function () {
+    try {
+      var savedTheme = localStorage.getItem('theme');
+      if (savedTheme === 'light' || savedTheme === 'dark') {
+        document.documentElement.setAttribute('data-theme', savedTheme);
+      }
+    } catch (e) {
+      // Ignore storage access errors and keep default theme.
+    }
+  })();
+</script>
