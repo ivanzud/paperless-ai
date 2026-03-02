@@ -225,16 +225,19 @@ class OpenAIService {
       const correspondentInstruction = (config.limitFunctions?.activateCorrespondents !== 'no' && existingCorrespondentList && existingCorrespondentList.length > 0)
         ? `IMPORTANT: The following correspondents already exist in the system: ${Array.isArray(existingCorrespondentList) ? existingCorrespondentList.join(', ') : existingCorrespondentList}\nWhen identifying the correspondent, prefer an existing one if the document's sender is a close match. Use EXACTLY that existing name (e.g. if the document shows "MediaMarkt Saturn Media GmbH" and "MediaMarkt" is in the list, return "MediaMarkt"). Only return a completely new name if none of the existing correspondents are a reasonable match.`
         : '';
+      const mustHavePrompt = config.mustHavePrompt
+        .replace('%CUSTOMFIELDS%', customFieldsStr)
+        .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+
       if (config.useExistingData === 'yes' && config.restrictToExistingTags === 'no' && config.restrictToExistingCorrespondents === 'no') {
         systemPrompt = `
         Pre-existing tags: ${existingTagsList}\n\n
         Pre-existing correspondents: ${existingCorrespondentList}\n\n
         Pre-existing document types: ${existingDocumentTypesList.join(', ')}\n\n
-        ` + process.env.SYSTEM_PROMPT + '\n\n' + config.mustHavePrompt.replace('%CUSTOMFIELDS%', customFieldsStr).replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+        ` + process.env.SYSTEM_PROMPT + '\n\n' + mustHavePrompt;
         promptTags = '';
       } else {
-        config.mustHavePrompt = config.mustHavePrompt.replace('%CUSTOMFIELDS%', customFieldsStr).replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
-        systemPrompt = process.env.SYSTEM_PROMPT + '\n\n' + config.mustHavePrompt;
+        systemPrompt = process.env.SYSTEM_PROMPT + '\n\n' + mustHavePrompt;
         promptTags = '';
       }
 
@@ -260,7 +263,7 @@ class OpenAIService {
 
       if (customPrompt) {
         console.log('[DEBUG] Replace system prompt with custom prompt via WebHook');
-        systemPrompt = customPrompt + '\n\n' + config.mustHavePrompt;
+        systemPrompt = customPrompt + '\n\n' + mustHavePrompt;
       }
 
       // Calculate tokens AFTER all prompt modifications are complete

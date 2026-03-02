@@ -491,18 +491,31 @@ document.addEventListener('DOMContentLoaded', (event) => {
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
 
         try {
+            if (typeof updateCustomFieldsJson === 'function') {
+                updateCustomFieldsJson();
+            }
 
             const formData = new FormData(setupForm);
+            if (formData.get('showTags') === 'no') {
+                formData.set('tags', '');
+            }
+            if (formData.get('usePromptTags') === 'no') {
+                formData.set('promptTags', '');
+            }
+            if (!formData.get('customFields')) {
+                formData.set('customFields', '{"custom_fields":[]}');
+            }
             //remove from formData.systemPrompt all ` chars
             if (formData.get('systemPrompt')) {
                 formData.set('systemPrompt', formData.get('systemPrompt').replace(/`/g, ''));
             }
+            const payload = Object.fromEntries(formData.entries());
             const response = await fetch('/settings', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(Object.fromEntries(formData))
+                body: JSON.stringify(payload)
             });
 
             const result = await response.json();

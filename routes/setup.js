@@ -4348,19 +4348,19 @@ router.post('/settings', express.json(), async (req, res) => {
 
     // Update general settings
     if (scanInterval) updatedConfig.SCAN_INTERVAL = scanInterval;
-    if (systemPrompt) updatedConfig.SYSTEM_PROMPT = processedPrompt.replace(/\r\n/g, '\n').replace(/\n/g, '\\n');
+    if (systemPrompt !== undefined) updatedConfig.SYSTEM_PROMPT = processedPrompt.replace(/\r\n/g, '\n').replace(/\n/g, '\\n');
     if (showTags) updatedConfig.PROCESS_PREDEFINED_DOCUMENTS = showTags;
     if (tokenLimit) updatedConfig.TOKEN_LIMIT = tokenLimit;
     if (responseTokens) updatedConfig.RESPONSE_TOKENS = responseTokens;
     if (tags !== undefined) updatedConfig.TAGS = normalizeArray(tags);
     if (aiProcessedTag) updatedConfig.ADD_AI_PROCESSED_TAG = aiProcessedTag;
-    if (aiTagName) updatedConfig.AI_PROCESSED_TAG_NAME = aiTagName;
+    if (aiTagName !== undefined) updatedConfig.AI_PROCESSED_TAG_NAME = aiTagName || 'ai-processed';
     if (usePromptTags) updatedConfig.USE_PROMPT_TAGS = usePromptTags;
-    if (promptTags) updatedConfig.PROMPT_TAGS = normalizeArray(promptTags);
+    if (promptTags !== undefined) updatedConfig.PROMPT_TAGS = normalizeArray(promptTags);
     if (useExistingData) updatedConfig.USE_EXISTING_DATA = useExistingData;
-    if (customApiKey) updatedConfig.CUSTOM_API_KEY = customApiKey;
-    if (customBaseUrl) updatedConfig.CUSTOM_BASE_URL = customBaseUrl;
-    if (customModel) updatedConfig.CUSTOM_MODEL = customModel;
+    if (customApiKey !== undefined) updatedConfig.CUSTOM_API_KEY = customApiKey;
+    if (customBaseUrl !== undefined) updatedConfig.CUSTOM_BASE_URL = customBaseUrl;
+    if (customModel !== undefined) updatedConfig.CUSTOM_MODEL = customModel;
     if (disableAutomaticProcessing) updatedConfig.DISABLE_AUTOMATIC_PROCESSING = disableAutomaticProcessing;
 
     // Update custom fields
