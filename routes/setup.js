@@ -3077,12 +3077,14 @@ router.post('/manual/analyze', express.json(), async (req, res) => {
 
     if (process.env.AI_PROVIDER === 'openai') {
       const analyzeDocument = await openaiService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
-      await documentModel.addOpenAIMetrics(
-            id, 
-            analyzeDocument.metrics.promptTokens,
-            analyzeDocument.metrics.completionTokens,
-            analyzeDocument.metrics.totalTokens
-          )
+      if (analyzeDocument?.metrics) {
+        await documentModel.addOpenAIMetrics(
+          id,
+          analyzeDocument.metrics.promptTokens ?? 0,
+          analyzeDocument.metrics.completionTokens ?? 0,
+          analyzeDocument.metrics.totalTokens ?? 0
+        );
+      }
       return res.json(analyzeDocument);
     } else if (process.env.AI_PROVIDER === 'ollama') {
       const analyzeDocument = await ollamaService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
@@ -3189,33 +3191,39 @@ router.post('/manual/playground', express.json(), async (req, res) => {
 
     if (process.env.AI_PROVIDER === 'openai') {
       const analyzeDocument = await openaiService.analyzePlayground(content, prompt);
-      await documentModel.addOpenAIMetrics(
-        documentId, 
-        analyzeDocument.metrics.promptTokens,
-        analyzeDocument.metrics.completionTokens,
-        analyzeDocument.metrics.totalTokens
-      )
+      if (analyzeDocument?.metrics) {
+        await documentModel.addOpenAIMetrics(
+          documentId,
+          analyzeDocument.metrics.promptTokens ?? 0,
+          analyzeDocument.metrics.completionTokens ?? 0,
+          analyzeDocument.metrics.totalTokens ?? 0
+        );
+      }
       return res.json(analyzeDocument);
     } else if (process.env.AI_PROVIDER === 'ollama') {
       const analyzeDocument = await ollamaService.analyzePlayground(content, prompt);
       return res.json(analyzeDocument);
     } else if (process.env.AI_PROVIDER === 'custom') {
       const analyzeDocument = await customService.analyzePlayground(content, prompt);
-      await documentModel.addOpenAIMetrics(
-        documentId, 
-        analyzeDocument.metrics.promptTokens,
-        analyzeDocument.metrics.completionTokens,
-        analyzeDocument.metrics.totalTokens
-      )
+      if (analyzeDocument?.metrics) {
+        await documentModel.addOpenAIMetrics(
+          documentId,
+          analyzeDocument.metrics.promptTokens ?? 0,
+          analyzeDocument.metrics.completionTokens ?? 0,
+          analyzeDocument.metrics.totalTokens ?? 0
+        );
+      }
       return res.json(analyzeDocument);
     } else if (process.env.AI_PROVIDER === 'azure') {
       const analyzeDocument = await azureService.analyzePlayground(content, prompt);
-      await documentModel.addOpenAIMetrics(
-        documentId, 
-        analyzeDocument.metrics.promptTokens,
-        analyzeDocument.metrics.completionTokens,
-        analyzeDocument.metrics.totalTokens
-      )
+      if (analyzeDocument?.metrics) {
+        await documentModel.addOpenAIMetrics(
+          documentId,
+          analyzeDocument.metrics.promptTokens ?? 0,
+          analyzeDocument.metrics.completionTokens ?? 0,
+          analyzeDocument.metrics.totalTokens ?? 0
+        );
+      }
       return res.json(analyzeDocument);
     } else {
       return res.status(500).json({ error: 'AI provider not configured' });
