@@ -17,6 +17,101 @@ class OpenAIService {
     this.client = null;
   }
 
+  _isRateLimitError(error) {
+    if (!error) return false;
+
+    const status = error.status || error?.response?.status || error?.error?.status;
+    if (status === 429) {
+      return true;
+    }
+
+    const code = String(error.code || error?.error?.code || '').toLowerCase();
+    if (code.includes('rate_limit')) {
+      return true;
+    }
+
+    const message = String(error.message || error?.error?.message || '').toLowerCase();
+    return (
+      message.includes('rate limit') ||
+      message.includes('too many requests') ||
+      message.includes('429')
+    );
+  }
+
+  _getHeaderValue(headers, headerName) {
+    if (!headers || typeof headers !== 'object') {
+      return null;
+    }
+
+    const targetHeader = String(headerName).toLowerCase();
+    for (const [key, value] of Object.entries(headers)) {
+      if (String(key).toLowerCase() === targetHeader) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  _getRetryDelayMs(error, attempt) {
+    const headers = error?.headers || error?.response?.headers || error?.error?.headers;
+    const retryAfterMsHeader = this._getHeaderValue(headers, 'retry-after-ms');
+    if (retryAfterMsHeader != null) {
+      const parsedMs = Number(retryAfterMsHeader);
+      if (Number.isFinite(parsedMs) && parsedMs > 0) {
+        return Math.min(30000, Math.max(250, parsedMs));
+      }
+    }
+
+    const retryAfterHeader = this._getHeaderValue(headers, 'retry-after');
+    if (retryAfterHeader != null) {
+      const parsedSeconds = Number(retryAfterHeader);
+      if (Number.isFinite(parsedSeconds) && parsedSeconds > 0) {
+        return Math.min(30000, Math.max(250, parsedSeconds * 1000));
+      }
+
+      const parsedDate = Date.parse(retryAfterHeader);
+      if (!Number.isNaN(parsedDate)) {
+        const waitMs = parsedDate - Date.now();
+        if (waitMs > 0) {
+          return Math.min(30000, Math.max(250, waitMs));
+        }
+      }
+    }
+
+    const baseDelay = 1000;
+    const exponentialDelay = baseDelay * (2 ** (attempt - 1));
+    return Math.min(30000, exponentialDelay);
+  }
+
+  async _sleep(ms) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async _createChatCompletionWithRetry(payload, context = 'OpenAI request') {
+    const maxAttempts = 4;
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.client.chat.completions.create(payload);
+      } catch (error) {
+        lastError = error;
+
+        if (!this._isRateLimitError(error) || attempt === maxAttempts) {
+          throw error;
+        }
+
+        const delayMs = this._getRetryDelayMs(error, attempt);
+        console.warn(
+          `[WARNING] ${context} rate limited (429). Retrying attempt ${attempt + 1}/${maxAttempts} after ${delayMs}ms.`
+        );
+        await this._sleep(delayMs);
+      }
+    }
+
+    throw lastError;
+  }
+
   _normalizeNotesField(parsedResponse) {
     if (!parsedResponse || typeof parsedResponse !== 'object') return parsedResponse;
     if (parsedResponse.notes == null && parsedResponse.note != null) {
@@ -193,7 +288,7 @@ class OpenAIService {
 
       await writePromptToFile(systemPrompt, truncatedContent);
 
-      const response = await this.client.chat.completions.create({
+      const response = await this._createChatCompletionWithRetry({
         model: model,
         messages: [
           {
@@ -206,7 +301,7 @@ class OpenAIService {
           }
         ],
         ...(model !== 'o3-mini' && { temperature: 0.3 }),
-      });
+      }, 'analyzeDocument');
 
       if (!response?.choices?.[0]?.message?.content) {
         throw new Error('Invalid API response structure');
@@ -252,7 +347,13 @@ class OpenAIService {
       return {
         document: { tags: [], correspondent: null, notes: null },
         metrics: null,
-        error: error.message
+        error: error.message,
+        errorDetails: {
+          status: error.status || error?.error?.status || null,
+          code: error.code || error?.error?.code || null,
+          type: error.type || error?.error?.type || null,
+          param: error.param || error?.error?.param || null
+        }
       };
     }
   }
@@ -318,7 +419,7 @@ class OpenAIService {
       const truncatedContent = await truncateToTokenLimit(content, availableTokens);
       const model = process.env.OPENAI_MODEL;
       // Make API request
-      const response = await this.client.chat.completions.create({
+      const response = await this._createChatCompletionWithRetry({
         model: model,
         messages: [
           {
@@ -331,7 +432,7 @@ class OpenAIService {
           }
         ],
         ...(model !== 'o3-mini' && { temperature: 0.3 }),
-      });
+      }, 'analyzePlayground');
 
       // Handle response
       if (!response?.choices?.[0]?.message?.content) {
@@ -376,7 +477,13 @@ class OpenAIService {
       return {
         document: { tags: [], correspondent: null, notes: null },
         metrics: null,
-        error: error.message
+        error: error.message,
+        errorDetails: {
+          status: error.status || error?.error?.status || null,
+          code: error.code || error?.error?.code || null,
+          type: error.type || error?.error?.type || null,
+          param: error.param || error?.error?.param || null
+        }
       };
     }
   }
@@ -396,7 +503,7 @@ class OpenAIService {
 
       const model = process.env.OPENAI_MODEL || config.openai.model;
 
-      const response = await this.client.chat.completions.create({
+      const response = await this._createChatCompletionWithRetry({
         model: model,
         messages: [
           {
@@ -405,7 +512,7 @@ class OpenAIService {
           }
         ],
         temperature: 0.7
-      });
+      }, 'generateText');
 
       if (!response?.choices?.[0]?.message?.content) {
         throw new Error('Invalid API response structure');
@@ -426,7 +533,7 @@ class OpenAIService {
       if (!this.client) {
         throw new Error('OpenAI client not initialized - missing API key');
       }
-      const response = await this.client.chat.completions.create({
+      const response = await this._createChatCompletionWithRetry({
         model: process.env.OPENAI_MODEL,
         messages: [
           {
@@ -435,7 +542,7 @@ class OpenAIService {
           }
         ],
         temperature: 0.7
-      });
+      }, 'checkStatus');
       if (!response?.choices?.[0]?.message?.content) {
         throw new Error('Invalid API response structure');
       }

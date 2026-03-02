@@ -1558,6 +1558,10 @@ try {
             if (error?.stack) {
               console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
             }
+            if (isRateLimitError(error)) {
+              console.warn('[WARNING] AI provider rate limit encountered (HTTP 429). Stopping current scan run to avoid rapid retries.');
+              break;
+            }
           }
         }
       } catch (error) {
@@ -1630,7 +1634,14 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
   }
   console.log('Repsonse from AI service:', analysis);
   if (analysis.error) {
-    throw new Error(`[ERROR] Document analysis failed: ${analysis.error}`);
+    const analysisError = new Error(`[ERROR] Document analysis failed: ${analysis.error}`);
+    const errorDetails = analysis.errorDetails || {};
+    analysisError.status = errorDetails.status || null;
+    analysisError.code = errorDetails.code || null;
+    analysisError.type = errorDetails.type || null;
+    analysisError.param = errorDetails.param || null;
+    analysisError.isRateLimit = isRateLimitError(analysisError);
+    throw analysisError;
   }
   await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
   return { analysis, originalData };
@@ -2390,6 +2401,36 @@ router.get('/api/tagsCount', async (req, res) => {
 
 const documentQueue = [];
 let isProcessing = false;
+const QUEUE_RATE_LIMIT_COOLDOWN_MS = 60 * 1000;
+let queueRateLimitResumeAt = 0;
+let queueRateLimitTimer = null;
+
+function isRateLimitError(error) {
+  if (!error) {
+    return false;
+  }
+
+  if (error.isRateLimit === true) {
+    return true;
+  }
+
+  const status = error.status || error?.response?.status || error?.error?.status || error?.errorDetails?.status;
+  if (status === 429) {
+    return true;
+  }
+
+  const code = String(error.code || error?.error?.code || error?.errorDetails?.code || '').toLowerCase();
+  if (code.includes('rate_limit')) {
+    return true;
+  }
+
+  const message = String(error.message || error?.error?.message || '').toLowerCase();
+  return (
+    message.includes('rate limit') ||
+    message.includes('too many requests') ||
+    message.includes('429')
+  );
+}
 
 function extractDocumentId(url) {
   const match = url.match(/\/documents\/(\d+)\//);
@@ -2405,6 +2446,18 @@ async function processQueue(customPrompt) {
   }
 
   if (isProcessing || documentQueue.length === 0) return;
+
+  if (queueRateLimitResumeAt > Date.now()) {
+    const delayMs = queueRateLimitResumeAt - Date.now();
+    if (!queueRateLimitTimer) {
+      console.warn(`[WARNING] Queue processing paused for ${Math.ceil(delayMs / 1000)}s due to previous rate limit.`);
+      queueRateLimitTimer = setTimeout(() => {
+        queueRateLimitTimer = null;
+        processQueue(customPrompt);
+      }, delayMs);
+    }
+    return;
+  }
   
   isProcessing = true;
   
@@ -2442,6 +2495,14 @@ async function processQueue(customPrompt) {
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
       } catch (error) {
         console.error(`[ERROR] Failed to process document ${doc.id}:`, error);
+        if (isRateLimitError(error)) {
+          documentQueue.unshift(doc);
+          queueRateLimitResumeAt = Date.now() + QUEUE_RATE_LIMIT_COOLDOWN_MS;
+          console.warn(
+            `[WARNING] AI provider rate limit encountered (HTTP 429). Pausing queue processing for ${QUEUE_RATE_LIMIT_COOLDOWN_MS / 1000}s.`
+          );
+          break;
+        }
       }
     }
   } catch (error) {
@@ -2450,7 +2511,17 @@ async function processQueue(customPrompt) {
     isProcessing = false;
     
     if (documentQueue.length > 0) {
-      processQueue();
+      const delayMs = Math.max(0, queueRateLimitResumeAt - Date.now());
+      if (delayMs > 0) {
+        if (!queueRateLimitTimer) {
+          queueRateLimitTimer = setTimeout(() => {
+            queueRateLimitTimer = null;
+            processQueue(customPrompt);
+          }, delayMs);
+        }
+      } else {
+        processQueue(customPrompt);
+      }
     }
   }
 }

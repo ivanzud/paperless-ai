@@ -137,6 +137,104 @@ class CustomOpenAIService {
       || message.includes('input tokens');
   }
 
+  _isRateLimitError(error) {
+    if (!error) {
+      return false;
+    }
+
+    const status = error.status || error?.response?.status || error?.error?.status;
+    if (status === 429) {
+      return true;
+    }
+
+    const code = String(error.code || error?.error?.code || '').toLowerCase();
+    if (code.includes('rate_limit')) {
+      return true;
+    }
+
+    const message = String(error?.message || error?.error?.message || '').toLowerCase();
+    return (
+      message.includes('rate limit') ||
+      message.includes('too many requests') ||
+      message.includes('429')
+    );
+  }
+
+  _getHeaderValue(headers, headerName) {
+    if (!headers || typeof headers !== 'object') {
+      return null;
+    }
+
+    const targetHeader = String(headerName).toLowerCase();
+    for (const [key, value] of Object.entries(headers)) {
+      if (String(key).toLowerCase() === targetHeader) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  _getRetryDelayMs(error, attempt) {
+    const headers = error?.headers || error?.response?.headers || error?.error?.headers;
+    const retryAfterMsHeader = this._getHeaderValue(headers, 'retry-after-ms');
+    if (retryAfterMsHeader != null) {
+      const parsedMs = Number(retryAfterMsHeader);
+      if (Number.isFinite(parsedMs) && parsedMs > 0) {
+        return Math.min(30000, Math.max(250, parsedMs));
+      }
+    }
+
+    const retryAfterHeader = this._getHeaderValue(headers, 'retry-after');
+    if (retryAfterHeader != null) {
+      const parsedSeconds = Number(retryAfterHeader);
+      if (Number.isFinite(parsedSeconds) && parsedSeconds > 0) {
+        return Math.min(30000, Math.max(250, parsedSeconds * 1000));
+      }
+
+      const parsedDate = Date.parse(retryAfterHeader);
+      if (!Number.isNaN(parsedDate)) {
+        const waitMs = parsedDate - Date.now();
+        if (waitMs > 0) {
+          return Math.min(30000, Math.max(250, waitMs));
+        }
+      }
+    }
+
+    const baseDelay = 1000;
+    const exponentialDelay = baseDelay * (2 ** (attempt - 1));
+    return Math.min(30000, exponentialDelay);
+  }
+
+  async _sleep(ms) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async _createChatCompletionWithRetry(payload, context = 'Custom OpenAI request') {
+    const maxAttempts = 4;
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.client.chat.completions.create(payload);
+      } catch (error) {
+        lastError = error;
+
+        if (!this._isRateLimitError(error) || attempt === maxAttempts) {
+          throw error;
+        }
+
+        const delayMs = this._getRetryDelayMs(error, attempt);
+        console.warn(
+          `[WARNING] ${context} rate limited (429). Retrying attempt ${attempt + 1}/${maxAttempts} after ${delayMs}ms.`
+        );
+        await this._sleep(delayMs);
+      }
+    }
+
+    throw lastError;
+  }
+
   async _fitChunkToInputBudget(systemPrompt, chunkContent, model, maxInputTokens) {
     let candidate = String(chunkContent || '');
     if (!candidate) {
@@ -279,7 +377,7 @@ class CustomOpenAIService {
   }
 
   async _analyzeSingleChunk(systemPrompt, chunkContent, model, timestamp) {
-    const response = await this.client.chat.completions.create({
+    const response = await this._createChatCompletionWithRetry({
       model: model,
       messages: [
         {
@@ -292,7 +390,7 @@ class CustomOpenAIService {
         }
       ],
       temperature: 0.3,
-    });
+    }, 'analyzeDocument chunk');
 
     if (!response?.choices?.[0]?.message?.content) {
       throw new Error('Invalid API response structure');
@@ -628,7 +726,7 @@ class CustomOpenAIService {
       const truncatedContent = await truncateToTokenLimit(content, availableTokens);
 
       // Make API request
-      const response = await this.client.chat.completions.create({
+      const response = await this._createChatCompletionWithRetry({
         model: config.custom.model,
         messages: [
           {
@@ -638,10 +736,10 @@ class CustomOpenAIService {
           {
             role: "user",
             content: truncatedContent
-          }
-        ],
-        temperature: 0.3,
-      });
+        }
+      ],
+      temperature: 0.3,
+      }, 'analyzePlayground');
 
       // Handle response
       if (!response?.choices?.[0]?.message?.content) {
@@ -707,7 +805,7 @@ class CustomOpenAIService {
         ? configuredResponseTokens
         : 1000;
 
-      const response = await this.client.chat.completions.create({
+      const response = await this._createChatCompletionWithRetry({
         model: model,
         messages: [
           {
@@ -717,7 +815,7 @@ class CustomOpenAIService {
         ],
         temperature: 0.7,
         max_tokens: maxTokens
-      });
+      }, 'generateText');
 
       if (!response?.choices?.[0]?.message?.content) {
         throw new Error('Invalid API response structure');
@@ -740,7 +838,7 @@ class CustomOpenAIService {
 
       const model = config.custom.model;
 
-      const response = await this.client.chat.completions.create({
+      const response = await this._createChatCompletionWithRetry({
         model: model,
         messages: [
           {
@@ -750,7 +848,7 @@ class CustomOpenAIService {
         ],
         temperature: 0.7,
         max_tokens: 1000
-      });
+      }, 'checkStatus');
 
       if (!response?.choices?.[0]?.message?.content) {
         return { status: 'error' };
