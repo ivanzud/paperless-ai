@@ -1573,82 +1573,67 @@ try {
 });
 
 async function processDocument(doc, existingTags, existingCorrespondentList, existingDocumentTypesList, ownUserId, customPrompt = null) {
-  const isProcessed = await documentModel.isDocumentProcessed(doc.id);
+  const isProcessed = await documentModel.isDocumentProcessed(doc.id, doc.checksum);
   if (isProcessed) return null;
   await documentModel.setProcessingStatus(doc.id, doc.title, 'processing');
 
-  try {
-    const documentEditable = await paperlessService.getPermissionOfDocument(doc.id);
-    if (!documentEditable) {
-      console.log(`[DEBUG] Document belongs to: ${documentEditable}, skipping analysis`);
-      console.log(`[DEBUG] Document ${doc.id} Not Editable by Paper-Ai User, skipping analysis`);
-      await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
-      return null;
-    }else {
-      console.log(`[DEBUG] Document ${doc.id} rights for AI User - processed`);
-    }
-
-    let [content, originalData] = await Promise.all([
-      paperlessService.getDocumentContent(doc.id),
-      paperlessService.getDocument(doc.id)
-    ]);
-
-    if (!content || content.length < 10) {
-      console.log(`[DEBUG] Document ${doc.id} has no content, skipping analysis`);
-      await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
-      return null;
-    }
-
-    if (content.length > 50000) {
-      content = content.substring(0, 50000);
-    }
-
-    // Prepare options for AI service
-    const options = {
-      restrictToExistingTags: config.restrictToExistingTags === 'yes',
-      restrictToExistingCorrespondents: config.restrictToExistingCorrespondents === 'yes'
-    };
-
-    // Get external API data if enabled
-    if (config.externalApiConfig.enabled === 'yes') {
-      try {
-        const externalApiService = require('../services/externalApiService');
-        const externalData = await externalApiService.fetchData();
-        if (externalData) {
-          options.externalApiData = externalData;
-          console.log('[DEBUG] Retrieved external API data for prompt enrichment');
-        }
-      } catch (error) {
-        console.error('[ERROR] Failed to fetch external API data:', error.message);
-      }
-    }
-
-    const aiService = AIServiceFactory.getService();
-    let analysis;
-    if(customPrompt) {
-      console.log('[DEBUG] Starting document analysis with custom prompt');
-      analysis = await aiService.analyzeDocument(content, existingTags, existingCorrespondentList, existingDocumentTypesList, doc.id, customPrompt, options);
-    }else{
-      analysis = await aiService.analyzeDocument(content, existingTags, existingCorrespondentList, existingDocumentTypesList, doc.id, null, options);
-    }
-    console.log('Repsonse from AI service:', analysis);
-    if (analysis.warnings?.length) {
-      console.warn(`[WARNING] Document ${doc.id} analyzed with partial chunk failures:`, analysis.warnings);
-    }
-    if (analysis.error) {
-      console.error(`[ERROR] Detailed analysis error for document ${doc.id}:`, {
-        message: analysis.error,
-        details: analysis.errorDetails || null,
-        warnings: analysis.warnings || []
-      });
-      throw new Error(`[ERROR] Document analysis failed: ${analysis.error}`);
-    }
-    await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
-    return { analysis, originalData };
-  } catch (error) {
-    await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
-    throw error;
+  const documentEditable = await paperlessService.getPermissionOfDocument(doc.id);
+  if (!documentEditable) {
+    console.log(`[DEBUG] Document belongs to: ${documentEditable}, skipping analysis`);
+    console.log(`[DEBUG] Document ${doc.id} Not Editable by Paper-Ai User, skipping analysis`);
+    return null;
+  }else {
+    console.log(`[DEBUG] Document ${doc.id} rights for AI User - processed`);
   }
+
+  let [content, originalData] = await Promise.all([
+    paperlessService.getDocumentContent(doc.id),
+    paperlessService.getDocument(doc.id)
+  ]);
+
+  if (!content || !content.length >= 10) {
+    console.log(`[DEBUG] Document ${doc.id} has no content, skipping analysis`);
+    return null;
+  }
+
+  if (content.length > 50000) {
+    content = content.substring(0, 50000);
+  }
+
+  // Prepare options for AI service
+  const options = {
+    restrictToExistingTags: config.restrictToExistingTags === 'yes',
+    restrictToExistingCorrespondents: config.restrictToExistingCorrespondents === 'yes'
+  };
+
+  // Get external API data if enabled
+  if (config.externalApiConfig.enabled === 'yes') {
+    try {
+      const externalApiService = require('../services/externalApiService');
+      const externalData = await externalApiService.fetchData();
+      if (externalData) {
+        options.externalApiData = externalData;
+        console.log('[DEBUG] Retrieved external API data for prompt enrichment');
+      }
+    } catch (error) {
+      console.error('[ERROR] Failed to fetch external API data:', error.message);
+    }
+  }
+
+  const aiService = AIServiceFactory.getService();
+  let analysis;
+  if(customPrompt) {
+    console.log('[DEBUG] Starting document analysis with custom prompt');
+    analysis = await aiService.analyzeDocument(content, existingTags, existingCorrespondentList, existingDocumentTypesList, doc.id, customPrompt, options);
+  }else{
+    analysis = await aiService.analyzeDocument(content, existingTags, existingCorrespondentList, existingDocumentTypesList, doc.id, null, options);
+  }
+  console.log('Repsonse from AI service:', analysis);
+  if (analysis.error) {
+    throw new Error(`[ERROR] Document analysis failed: ${analysis.error}`);
+  }
+  await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
+  return { analysis, originalData };
 }
 
 async function buildUpdateData(analysis, doc) {
@@ -1772,20 +1757,23 @@ async function buildUpdateData(analysis, doc) {
   return updateData;
 }
 
+  return updateData;
+}
+
 async function saveDocumentChanges(docId, updateData, analysis, originalData) {
   const { tags: originalTags, correspondent: originalCorrespondent, title: originalTitle } = originalData;
-  
+
   await Promise.all([
-    documentModel.saveOriginalData(docId, originalTags, originalCorrespondent, originalTitle, null),
+    documentModel.saveOriginalData(docId, originalTags, originalCorrespondent, originalTitle),
     paperlessService.updateDocument(docId, updateData),
-    documentModel.addProcessedDocument(docId, updateData.title),
+    documentModel.addProcessedDocument(docId, updateData.title, originalData.checksum),
     documentModel.addOpenAIMetrics(
-      docId, 
+      docId,
       analysis.metrics.promptTokens,
       analysis.metrics.completionTokens,
       analysis.metrics.totalTokens
     ),
-    documentModel.addToHistory(docId, updateData.tags, updateData.title, analysis.document.correspondent, updateData.notes ?? null)
+    documentModel.addToHistory(docId, updateData.tags, updateData.title, analysis.document.correspondent)
   ]);
 }
 

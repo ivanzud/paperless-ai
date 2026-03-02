@@ -28,6 +28,13 @@ const createTableMain = db.prepare(`
 `);
 createTableMain.run();
 
+// Migration: add content_checksum column for ID recycling detection (#871)
+try {
+  db.prepare(`ALTER TABLE processed_documents ADD COLUMN content_checksum TEXT`).run();
+} catch (e) {
+  // Column already exists — ignore
+}
+
 const createTableMetrics = db.prepare(`
   CREATE TABLE IF NOT EXISTS openai_metrics (
     id INTEGER PRIMARY KEY,
@@ -90,11 +97,13 @@ ensureColumn('original_documents', 'notes', 'TEXT');
 
 // Prepare statements for better performance
 const insertDocument = db.prepare(`
-  INSERT INTO processed_documents (document_id, title) 
-  VALUES (?, ?)
+  INSERT INTO processed_documents (document_id, title, content_checksum)
+  VALUES (?, ?, ?)
   ON CONFLICT(document_id) DO UPDATE SET
-    last_updated = CURRENT_TIMESTAMP,
-    title = excluded.title
+    title = excluded.title,
+    content_checksum = excluded.content_checksum,
+    last_updated = CURRENT_TIMESTAMP
+  WHERE document_id = excluded.document_id
 `);
 
 const findDocument = db.prepare(
@@ -165,10 +174,9 @@ const getActiveProcessing = db.prepare(`
 
 
 module.exports = {
-  async addProcessedDocument(documentId, title) {
+  async addProcessedDocument(documentId, title, contentChecksum = null) {
     try {
-      // Bei UNIQUE constraint failure wird der existierende Eintrag aktualisiert
-      const result = insertDocument.run(documentId, title);
+      const result = insertDocument.run(documentId, title, contentChecksum);
       if (result.changes > 0) {
         console.log(`[DEBUG] Document ${title} ${result.lastInsertRowid ? 'added to' : 'updated in'} processed_documents`);
         return true;
@@ -222,10 +230,16 @@ module.exports = {
     }
   },
 
-  async isDocumentProcessed(documentId) {
+  async isDocumentProcessed(documentId, contentChecksum = null) {
     try {
       const row = findDocument.get(documentId);
-      return !!row;
+      if (!row) return false;
+      // If a checksum is provided and doesn't match, the document ID was recycled
+      if (contentChecksum && row.content_checksum && row.content_checksum !== contentChecksum) {
+        console.log(`[DEBUG] Document ${documentId} checksum mismatch (stored: ${row.content_checksum}, current: ${contentChecksum}) — ID was recycled, reprocessing`);
+        return false;
+      }
+      return true;
     } catch (error) {
       console.error('[ERROR] checking document:', error);
       // Im Zweifelsfall true zurückgeben, um doppelte Verarbeitung zu vermeiden
