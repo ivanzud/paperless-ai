@@ -18,6 +18,11 @@ const COVERAGE_QUERY_PATTERNS = [
   /\bcu[aá]nt[oa]s?\b/i,
   /\bquant[ioe]\b/i
 ];
+const CORPUS_COUNT_HINT_PATTERNS = [
+  /\bcorpus\b/i,
+  /\bindex(?:ed)?\b/i,
+  /\ball documents?\b/i
+];
 
 class RagService {
   constructor() {
@@ -51,6 +56,13 @@ class RagService {
 
   isCoverageQuestion(question = '') {
     return COVERAGE_QUERY_PATTERNS.some((pattern) => pattern.test(question));
+  }
+
+  isCorpusCountQuestion(question = '') {
+    if (!this.isCoverageQuestion(question)) {
+      return false;
+    }
+    return CORPUS_COUNT_HINT_PATTERNS.some((pattern) => pattern.test(question));
   }
 
   resolveMaxSources(question, requestedMaxSources) {
@@ -108,6 +120,7 @@ class RagService {
   async askQuestion(question, options = {}) {
     try {
       const coverageQuestion = this.isCoverageQuestion(question);
+      const corpusCountQuestion = this.isCorpusCountQuestion(question);
       const maxSources = this.resolveMaxSources(question, options.maxSources);
       const contextTimeoutMs = this.parseTimeoutMs(process.env.RAG_CONTEXT_TIMEOUT_MS, 30000);
       // 1. Get context from the RAG service
@@ -163,6 +176,33 @@ class RagService {
       const sourceCount = sources.length;
       const retrievalCapped = resultCapHit === true;
       const retrievalLimit = Number.isInteger(searchLimit) && searchLimit > 0 ? searchLimit : null;
+
+      if (corpusCountQuestion) {
+        try {
+          const indexingStatus = await this.withTimeout(
+            axios.get(`${this.baseUrl}/indexing/status`, { timeout: contextTimeoutMs }),
+            contextTimeoutMs,
+            `RAG indexing status request timed out after ${contextTimeoutMs}ms`
+          );
+          const corpusDocumentCount = Number.parseInt(indexingStatus.data?.documents_count, 10);
+          if (Number.isInteger(corpusDocumentCount) && corpusDocumentCount >= 0) {
+            return {
+              answer: `The indexed corpus currently contains ${corpusDocumentCount} documents.`,
+              sources,
+              coverage: {
+                mode: resolvedCoverageMode,
+                total_matches: retrievedMatchCount,
+                sources_returned: sourceCount,
+                result_cap_hit: retrievalCapped,
+                corpus_documents: corpusDocumentCount,
+                answered_from: 'indexing_status'
+              }
+            };
+          }
+        } catch (error) {
+          console.warn('Failed to fetch deterministic corpus count from indexing status:', error.message);
+        }
+      }
       
       // 3. Use AI service to generate an answer based on the enhanced context
       const aiService = AIServiceFactory.getService();

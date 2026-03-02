@@ -67,12 +67,21 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
 
-// Swagger documentation route
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  swaggerOptions: {
-    url: '/api-docs/openapi.json'
-  }
-}));
+function sendOpenApiSpec(res) {
+  const openApiPath = path.join(process.cwd(), 'OPENAPI', 'openapi.json');
+  res.setHeader('Content-Type', 'application/json');
+
+  // Try to serve the static file first
+  fs.readFile(openApiPath)
+    .then(data => {
+      res.send(JSON.parse(data));
+    })
+    .catch(err => {
+      console.warn('Error reading OpenAPI file, generating dynamically:', err.message);
+      // Fallback to generating the spec if file can't be read
+      res.send(swaggerSpec);
+    });
+}
 
 /**
  * @swagger
@@ -108,26 +117,19 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.get('/api-docs/openapi.json', (req, res) => {
-  const openApiPath = path.join(process.cwd(), 'OPENAPI', 'openapi.json');
-  res.setHeader('Content-Type', 'application/json');
-  
-  // Try to serve the static file first
-  fs.readFile(openApiPath)
-    .then(data => {
-      res.send(JSON.parse(data));
-    })
-    .catch(err => {
-      console.warn('Error reading OpenAPI file, generating dynamically:', err.message);
-      // Fallback to generating the spec if file can't be read
-      res.send(swaggerSpec);
-    });
-});
+app.get('/api-docs/openapi.json', (req, res) => sendOpenApiSpec(res));
 
 // Add a redirect for the old endpoint for backward compatibility
 app.get('/api-docs.json', (req, res) => {
-  res.redirect('/api-docs/openapi.json');
+  sendOpenApiSpec(res);
 });
+
+// Swagger documentation route (mounted after JSON endpoints)
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  swaggerOptions: {
+    url: '/api-docs/openapi.json'
+  }
+}));
 
 // View engine setup
 app.set('view engine', 'ejs');
