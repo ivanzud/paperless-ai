@@ -3671,8 +3671,11 @@ router.post('/setup', express.json(), async (req, res) => {
     console.log('Setup request received:', redactedBody);
 
 
+    // Normalize user input to a base URL so /api is appended exactly once.
+    const normalizedPaperlessUrl = (paperlessUrl || '').replace(/\/+$/, '').replace(/\/api\/?$/, '');
+
     // Initialize paperlessService with the new credentials
-    const paperlessApiUrl = paperlessUrl + '/api';
+    const paperlessApiUrl = normalizedPaperlessUrl + '/api';
     const initSuccess = await paperlessService.initializeWithCredentials(paperlessApiUrl, paperlessToken);
     
     if (!initSuccess) {
@@ -3682,14 +3685,14 @@ router.post('/setup', express.json(), async (req, res) => {
     }
 
     // Validate Paperless credentials
-    const isPaperlessValid = await setupService.validatePaperlessConfig(paperlessUrl, paperlessToken);
+    const isPaperlessValid = await setupService.validatePaperlessConfig(normalizedPaperlessUrl, paperlessToken);
     if (!isPaperlessValid) {
       return res.status(400).json({ 
         error: 'Paperless-ngx connection failed. Please check URL and Token.'
       });
     }
 
-    const isPermissionValid = await setupService.validateApiPermissions(paperlessUrl, paperlessToken);
+    const isPermissionValid = await setupService.validateApiPermissions(normalizedPaperlessUrl, paperlessToken);
     if (!isPermissionValid.success) {
       return res.status(400).json({
         error: 'Paperless-ngx API permissions are insufficient. Error: ' + isPermissionValid.message
@@ -4182,9 +4185,11 @@ router.post('/settings', express.json(), async (req, res) => {
     const externalApiTimeout = req.body.externalApiTimeout || '5000';
     const externalApiTransform = req.body.externalApiTransform || '';
 
-    if (paperlessUrl !== currentConfig.PAPERLESS_API_URL?.replace('/api', '') || 
+    const normalizedPaperlessUrl = (paperlessUrl || '').replace(/\/+$/, '').replace(/\/api\/?$/, '');
+
+    if (normalizedPaperlessUrl !== currentConfig.PAPERLESS_API_URL?.replace('/api', '') || 
         paperlessToken !== currentConfig.PAPERLESS_API_TOKEN) {
-      const isPaperlessValid = await setupService.validatePaperlessConfig(paperlessUrl, paperlessToken);
+      const isPaperlessValid = await setupService.validatePaperlessConfig(normalizedPaperlessUrl, paperlessToken);
       if (!isPaperlessValid) {
         return res.status(400).json({ 
           error: 'Paperless-ngx connection failed. Please check URL and Token.'
@@ -4194,7 +4199,7 @@ router.post('/settings', express.json(), async (req, res) => {
 
     const updatedConfig = {};
 
-    if (paperlessUrl) updatedConfig.PAPERLESS_API_URL = paperlessUrl + '/api';
+    if (normalizedPaperlessUrl) updatedConfig.PAPERLESS_API_URL = normalizedPaperlessUrl + '/api';
     if (paperlessToken) updatedConfig.PAPERLESS_API_TOKEN = paperlessToken;
     if (paperlessUsername) updatedConfig.PAPERLESS_USERNAME = paperlessUsername;
 

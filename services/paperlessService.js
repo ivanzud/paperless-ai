@@ -16,10 +16,20 @@ class PaperlessService {
     this.CACHE_LIFETIME = 3000; // 3 Sekunden
   }
 
+  normalizeBaseUrl(apiUrl) {
+    if (!apiUrl || typeof apiUrl !== 'string') {
+      return apiUrl;
+    }
+
+    // Always target the Paperless API root exactly once.
+    const base = apiUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+    return `${base}/api`;
+  }
+
   initialize() {
     if (!this.client && config.paperless.apiUrl && config.paperless.apiToken) {
       this.client = axios.create({
-        baseURL: config.paperless.apiUrl,
+        baseURL: this.normalizeBaseUrl(config.paperless.apiUrl),
         headers: {
           'Authorization': `Token ${config.paperless.apiToken}`,
           'Content-Type': 'application/json'
@@ -116,7 +126,7 @@ class PaperlessService {
 
   async initializeWithCredentials(apiUrl, apiToken) {
     this.client = axios.create({
-      baseURL: apiUrl,
+      baseURL: this.normalizeBaseUrl(apiUrl),
       headers: {
         'Authorization': `Token ${apiToken}`,
         'Content-Type': 'application/json'
