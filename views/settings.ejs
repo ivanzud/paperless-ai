@@ -274,6 +274,7 @@
                                         <option value="ollama" <%= config.AI_PROVIDER === 'ollama' ? 'selected' : '' %>>Ollama (Local LLM)</option>
                                         <option value="custom" <%= config.AI_PROVIDER === 'custom' ? 'selected' : '' %>>Custom</option>
                                         <option value="azure" <%= config.AI_PROVIDER === 'azure' ? 'selected' : '' %>>Azure</option>
+										<option value="gemini" <%= config.AI_PROVIDER === 'gemini' ? 'selected' : '' %>>Gemini</option>
                                     </select>
                                 </div>
 
@@ -408,6 +409,33 @@
                                                value="<%= config.AZURE_API_VERSION %>"
                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                                placeholder="Enter API version">
+                                    </div>
+                                </div>
+								
+								<!-- Gemini Settings -->
+								<div id="geminiSettings" class="space-y-4">
+                                    <div class="space-y-2">
+                                        <label for="geminiApiKey" class="text-sm font-medium">Gemini API Key</label>
+                                        <div class="relative">
+                                            <input type="password" 
+                                                id="geminiApiKey" 
+                                                name="geminiApiKey"
+                                                value="<%= config.GEMINI_API_KEY || '' %>"
+                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                            <button type="button" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" data-input="geminiApiKey">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="space-y-2">
+                                        <label for="geminiModel" class="text-sm font-medium">Gemini Model</label>
+                                        <input type="text" 
+                                            id="geminiModel" 
+                                            name="geminiModel"
+                                            value="<%= config.GEMINI_MODEL || 'gemini-1.5-flash' %>"
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                            placeholder="gemini-1.5-flash">
                                     </div>
                                 </div>
 
@@ -779,9 +807,9 @@ function transform(data) {
                                                 
                                                 <div class="border border-gray-200 shadow-sm rounded-lg hover:border-blue-500 transition-colors duration-200">
                                                     <label for="activateCorrespondents" class="flex items-center p-4 cursor-pointer w-full">
-                                                        <input type="checkbox" 
-                                                            id="activateCorrespondents" 
-                                                            name="activateCorrespondents" 
+                                                        <input type="checkbox"
+                                                            id="activateCorrespondents"
+                                                            name="activateCorrespondents"
                                                             class="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                                                             <%= config.ACTIVATE_CORRESPONDENTS === 'yes' ? 'checked' : '' %>>
                                                         <div class="ml-3">
@@ -792,6 +820,22 @@ function transform(data) {
                                                             <p class="text-sm text-gray-500 mt-1">Identify document senders automatically</p>
                                                         </div>
                                                     </label>
+                                                    <div id="overwriteExistingCorrespondentSection" class="<%= config.ACTIVATE_CORRESPONDENTS === 'yes' ? '' : 'hidden' %> border-t border-gray-100 px-4 pb-3 pt-2 ml-8">
+                                                        <label for="overwriteExistingCorrespondent" class="flex items-center cursor-pointer">
+                                                            <input type="checkbox"
+                                                                id="overwriteExistingCorrespondent"
+                                                                name="overwriteExistingCorrespondent"
+                                                                class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                                                                <%= config.OVERWRITE_EXISTING_CORRESPONDENT === 'yes' ? 'checked' : '' %>>
+                                                            <div class="ml-3">
+                                                                <div class="flex items-center text-gray-700 text-sm font-medium">
+                                                                    <i class="fas fa-pen mr-2 text-orange-400"></i>
+                                                                    Overwrite existing correspondents
+                                                                </div>
+                                                                <p class="text-xs text-gray-400 mt-0.5">If enabled, the AI will overwrite correspondents already assigned by Paperless-NGX</p>
+                                                            </div>
+                                                        </label>
+                                                    </div>
                                                 </div>
                                                 
                                                 <div class="border border-gray-200 shadow-sm rounded-lg hover:border-blue-500 transition-colors duration-200">

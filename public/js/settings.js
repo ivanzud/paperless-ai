@@ -40,6 +40,7 @@ class FormManager {
         this.systemPrompt = document.getElementById('systemPrompt');
         this.systemPromptBtn = document.getElementById('systemPromptBtn');
         this.disableAutomaticProcessing = document.getElementById('disableAutomaticProcessing');
+        this.activateCorrespondents = document.getElementById('activateCorrespondents');
         this.initialize();
     }
 
@@ -47,23 +48,34 @@ class FormManager {
         this.toggleProviderSettings();
         this.toggleTagsInput();
         this.handleDisableAutomaticProcessing();
-        
+
         this.aiProvider.addEventListener('change', () => this.toggleProviderSettings());
-        this.tokenLimit.addEventListener('input', () => this.validateTokenLimit()); 
-        this.responseTokens.addEventListener('input', () => this.validateResponseTokens()); 
+        this.tokenLimit.addEventListener('input', () => this.validateTokenLimit());
+        this.responseTokens.addEventListener('input', () => this.validateResponseTokens());
         this.showTags.addEventListener('change', () => this.toggleTagsInput());
         this.aiProcessedTag.addEventListener('change', () => this.toggleAiTagInput());
         this.usePromptTags.addEventListener('change', () => this.togglePromptTagsInput());
         this.disableAutomaticProcessing.addEventListener('change', () => this.handleDisableAutomaticProcessing());
-        
+        this.activateCorrespondents.addEventListener('change', () => this.toggleOverwriteCorrespondentSection());
+
         this.initializePasswordToggles();
 
         if (this.usePromptTags.value === 'yes') {
             this.disablePromptElements();
         }
-        
+
         this.toggleAiTagInput();
         this.togglePromptTagsInput();
+    }
+
+    toggleOverwriteCorrespondentSection() {
+        const section = document.getElementById('overwriteExistingCorrespondentSection');
+        if (this.activateCorrespondents.checked) {
+            section.classList.remove('hidden');
+        } else {
+            section.classList.add('hidden');
+            document.getElementById('overwriteExistingCorrespondent').checked = false;
+        }
     }
 
     validateTokenLimit() {
@@ -99,12 +111,13 @@ class FormManager {
         hiddenInput.value = this.disableAutomaticProcessing.checked ? 'yes' : 'no';
     }
 
-    toggleProviderSettings() {
+	toggleProviderSettings() {
         const provider = this.aiProvider.value;
         const openaiSettings = document.getElementById('openaiSettings');
         const ollamaSettings = document.getElementById('ollamaSettings');
         const customSettings = document.getElementById('customSettings');
         const azureSettings = document.getElementById('azureSettings');
+        const geminiSettings = document.getElementById('geminiSettings');
 
         // Get all provider-specific fields
         const openaiKey = document.getElementById('openaiKey');
@@ -117,6 +130,8 @@ class FormManager {
         const azureEndpoint = document.getElementById('azureEndpoint');
         const azureDeploymentName = document.getElementById('azureDeploymentName');
         const azureApiVersion = document.getElementById('azureApiVersion');
+        const geminiApiKey = document.getElementById('geminiApiKey');
+        const geminiModel = document.getElementById('geminiModel');
 
         // Restriction settings
         const restrictToExistingTags = document.getElementById('restrictToExistingTags');
@@ -132,48 +147,53 @@ class FormManager {
         const externalApiTimeout = document.getElementById('externalApiTimeout');
         const externalApiTransformationTemplate = document.getElementById('externalApiTransformationTemplate');
         
-        
         // Hide all settings sections first
-        openaiSettings.classList.add('hidden');
-        ollamaSettings.classList.add('hidden');
-        customSettings.classList.add('hidden');
-        azureSettings.classList.add('hidden');
+        if (openaiSettings) openaiSettings.classList.add('hidden');
+        if (ollamaSettings) ollamaSettings.classList.add('hidden');
+        if (customSettings) customSettings.classList.add('hidden');
+        if (azureSettings) azureSettings.classList.add('hidden');
+        if (geminiSettings) geminiSettings.classList.add('hidden');
         
         // Reset all required fields
-        openaiKey.required = false;
-        ollamaUrl.required = false;
-        ollamaModel.required = false;
-        customBaseUrl.required = false;
-        customApiKey.required = false;
-        customModel.required = false;
-        azureApiKey.required = false;
-        azureEndpoint.required = false;
-        azureDeploymentName.required = false;
-        azureApiVersion.required = false;
+        if (openaiKey) openaiKey.required = false;
+        if (ollamaUrl) ollamaUrl.required = false;
+        if (ollamaModel) ollamaModel.required = false;
+        if (customBaseUrl) customBaseUrl.required = false;
+        if (customApiKey) customApiKey.required = false;
+        if (customModel) customModel.required = false;
+        if (azureApiKey) azureApiKey.required = false;
+        if (azureEndpoint) azureEndpoint.required = false;
+        if (azureDeploymentName) azureDeploymentName.required = false;
+        if (azureApiVersion) azureApiVersion.required = false;
+        if (geminiApiKey) geminiApiKey.required = false;
         
         // Show and set required fields based on selected provider
         switch (provider) {
             case 'openai':
-                openaiSettings.classList.remove('hidden');
-                openaiKey.required = true;
+                if (openaiSettings) openaiSettings.classList.remove('hidden');
+                if (openaiKey) openaiKey.required = true;
                 break;
             case 'ollama':
-                ollamaSettings.classList.remove('hidden');
-                ollamaUrl.required = true;
-                ollamaModel.required = true;
+                if (ollamaSettings) ollamaSettings.classList.remove('hidden');
+                if (ollamaUrl) ollamaUrl.required = true;
+                if (ollamaModel) ollamaModel.required = true;
                 break;
             case 'custom':
-                customSettings.classList.remove('hidden');
-                customBaseUrl.required = true;
-                customApiKey.required = true;
-                customModel.required = true;
+                if (customSettings) customSettings.classList.remove('hidden');
+                if (customBaseUrl) customBaseUrl.required = true;
+                if (customApiKey) customApiKey.required = true;
+                if (customModel) customModel.required = true;
                 break;
             case 'azure':
-                azureSettings.classList.remove('hidden');
-                azureApiKey.required = true;
-                azureEndpoint.required = true;
-                azureDeploymentName.required = true;
-                azureApiVersion.required = true;
+                if (azureSettings) azureSettings.classList.remove('hidden');
+                if (azureApiKey) azureApiKey.required = true;
+                if (azureEndpoint) azureEndpoint.required = true;
+                if (azureDeploymentName) azureDeploymentName.required = true;
+                if (azureApiVersion) azureApiVersion.required = true;
+                break;
+            case 'gemini':
+                if (geminiSettings) geminiSettings.classList.remove('hidden');
+                if (geminiApiKey) geminiApiKey.required = true;
                 break;
         }
     }

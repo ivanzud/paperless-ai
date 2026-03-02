@@ -55,6 +55,7 @@ module.exports = {
   PAPERLESS_AI_VERSION: '3.0.9',
   CONFIGURED: false,
   disableAutomaticProcessing: process.env.DISABLE_AUTOMATIC_PROCESSING || 'no',
+  overwriteExistingCorrespondent: parseEnvBoolean(process.env.OVERWRITE_EXISTING_CORRESPONDENT, 'no'),
   predefinedMode: process.env.PROCESS_PREDEFINED_DOCUMENTS,
   tokenLimit: process.env.TOKEN_LIMIT || 128000,
   responseTokens: process.env.RESPONSE_TOKENS || 1000,
@@ -88,6 +89,10 @@ module.exports = {
     deploymentName: process.env.AZURE_DEPLOYMENT_NAME || '',
     apiVersion: process.env.AZURE_API_VERSION || '2023-05-15'
   },
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY || '',
+    model: process.env.GEMINI_MODEL || 'gemini-1.5-flash'
+  },
   customFields: process.env.CUSTOM_FIELDS || '',
   aiProvider: process.env.AI_PROVIDER || 'openai',
   scanInterval: process.env.SCAN_INTERVAL || '*/30 * * * *',
@@ -118,6 +123,7 @@ module.exports = {
   mustHavePrompt: `  Return the result EXCLUSIVELY as a JSON object. The Tags, Title and Document_Type MUST be in the language that is used in the document.:
   IMPORTANT: The custom_fields are optional and can be left out if not needed, only try to fill out the values if you find a matching information in the document.
   Do not change the value of field_name, only fill out the values. If the field is about money only add the number without currency and always use a . for decimal places.
+  %EXISTING_CORRESPONDENTS%
   {
     "title": "xxxxx",
     "correspondent": "xxxxxxxx",

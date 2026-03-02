@@ -942,6 +942,41 @@ class PaperlessService {
     const response = await this.client.get(`/documents/${documentId}/`);
     return response.data.content;
   }
+  
+  async downloadDocument(documentId) {
+    this.initialize();
+    try {
+      console.log(`[DEBUG] Downloading original document ${documentId}...`);
+      const response = await this.client.get(`/documents/${documentId}/download/?original=true`, {
+        responseType: 'arraybuffer'
+      });
+
+      if (response.data && response.data.byteLength > 0) {
+        console.log(`[SUCCESS] Document ${documentId} downloaded successfully.`);
+        return Buffer.from(response.data);
+      }
+      
+      console.warn(`[WARN] No data received when downloading document ${documentId}`);
+      return null;
+    } catch (error) {
+      console.error(`[ERROR] downloading document ${documentId}:`, error.message);
+      if (error.response) {
+        console.log('[ERROR] status:', error.response.status);
+      }
+      return null;
+    }
+  }
+
+  async updateDocumentContent(documentId, content) {
+    this.initialize();
+    try {
+      console.log(`[DEBUG] Updating content field for document ${documentId}...`);
+      await this.client.patch(`/documents/${documentId}/`, { content });
+      console.log(`[SUCCESS] Content updated for document ${documentId}`);
+    } catch (error) {
+      console.error(`[ERROR] Failed to update content for document ${documentId}:`, error.message);
+    }
+  }
 
   async getDocument(documentId) {
     this.initialize();
@@ -1418,11 +1453,11 @@ async getOrCreateDocumentType(name, options = {}) {
       }
 
       if (currentDoc.correspondent && updates.correspondent) {
-        if (process.env.USE_EXISTING_DATA === 'yes') {
+        if (config.overwriteExistingCorrespondent === 'yes') {
+          console.log(`[DEBUG] Overwriting existing correspondent ${currentDoc.correspondent} with AI suggestion: ${updates.correspondent}`);
+        } else {
           console.log('[DEBUG] Document already has a correspondent, keeping existing one:', currentDoc.correspondent);
           delete updates.correspondent;
-        } else {
-          console.log('[DEBUG] Overwriting correspondent:', currentDoc.correspondent, '->', updates.correspondent);
         }
       }
 
