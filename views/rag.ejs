@@ -912,9 +912,11 @@
 
         function updateStatus(statusData) {
             // Update AI model info
+            const hasAIModel = typeof statusData.ai_model === 'string' && statusData.ai_model.trim() !== '';
             if (statusData.ai_status === 'ok') {
-                const modelName = statusData.ai_model.toUpperCase();
-                aiModelName.textContent = `AI MODEL: ${modelName}`;
+                aiModelName.textContent = hasAIModel
+                    ? `AI MODEL: ${statusData.ai_model.toUpperCase()}`
+                    : 'AI MODEL: Available';
             } else {
                 aiModelName.textContent = 'AI: Not available';
             }

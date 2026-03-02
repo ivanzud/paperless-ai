@@ -94,8 +94,8 @@ router.get('/status', async (req, res) => {
     const status = await ragService.checkStatus();
     const aiStatus = await ragService.getAIStatus();
     // Combine RAG and AI status
-    status.ai_status = aiStatus.status;
-    status.ai_model = aiStatus.model;
+    status.ai_status = aiStatus && typeof aiStatus.status === 'string' ? aiStatus.status : 'error';
+    status.ai_model = aiStatus && typeof aiStatus.model === 'string' && aiStatus.model.trim() ? aiStatus.model : null;
     // console.log('RAG Status:', status);
     // console.log('AI Status:', aiStatus);
     res.json(status);
