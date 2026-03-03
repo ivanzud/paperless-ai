@@ -20,6 +20,7 @@ const cookieParser = require('cookie-parser');
 const { authenticateJWT, isAuthenticated } = require('./auth.js');
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const customService = require('../services/customService.js');
+const metadataNormalizationService = require('../services/metadataNormalizationService');
 const config = require('../config/config.js');
 require('dotenv').config({ path: '../data/.env' });
 
@@ -3201,8 +3202,9 @@ router.post('/manual/analyze', express.json(), async (req, res) => {
       return res.status(400).json({ error: 'Valid content string is required' });
     }
 
+    let analyzeDocument;
     if (process.env.AI_PROVIDER === 'openai') {
-      const analyzeDocument = await openaiService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
+      analyzeDocument = await openaiService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
       if (analyzeDocument?.metrics) {
         await documentModel.addOpenAIMetrics(
           id,
@@ -3211,19 +3213,33 @@ router.post('/manual/analyze', express.json(), async (req, res) => {
           analyzeDocument.metrics.totalTokens ?? 0
         );
       }
-      return res.json(analyzeDocument);
     } else if (process.env.AI_PROVIDER === 'ollama') {
-      const analyzeDocument = await ollamaService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
-      return res.json(analyzeDocument);
+      analyzeDocument = await ollamaService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
     } else if (process.env.AI_PROVIDER === 'custom') {
-      const analyzeDocument = await customService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
-      return res.json(analyzeDocument);
+      analyzeDocument = await customService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
     } else if (process.env.AI_PROVIDER === 'azure') {
-      const analyzeDocument = await azureService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
-      return res.json(analyzeDocument);
+      analyzeDocument = await azureService.analyzeDocument(content, existingTagsList, existingCorrespondentList, existingDocumentTypesList, id || []);
     } else {
       return res.status(500).json({ error: 'AI provider not configured' });
     }
+
+    let currentDoc = null;
+    if (id) {
+      try {
+        currentDoc = await paperlessService.getDocument(id);
+      } catch (error) {
+        console.warn(`[WARN] Failed to load current document ${id} for normalization:`, error.message);
+      }
+    }
+
+    if (analyzeDocument && analyzeDocument.document) {
+      analyzeDocument.document = metadataNormalizationService.normalizeAnalysisDocument(
+        analyzeDocument.document,
+        { currentDoc: currentDoc || {}, maxTags: 4 }
+      );
+    }
+
+    return res.json(analyzeDocument);
   } catch (error) {
     console.error('Analysis error:', error);
     return res.status(500).json({ error: error.message });

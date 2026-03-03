@@ -11,8 +11,12 @@ class PaperlessService {
   constructor() {
     this.client = null;
     this.tagCache = new Map();
+    this.tagNormalizedCache = new Map();
+    this.documentTypeCache = new Map();
+    this.documentTypeNormalizedCache = new Map();
     this.customFieldCache = new Map();
     this.lastTagRefresh = 0;
+    this.lastDocumentTypeRefresh = 0;
     this.CACHE_LIFETIME = 3000; // 3 Sekunden
   }
 
@@ -36,6 +40,155 @@ class PaperlessService {
         }
       });
     }
+  }
+
+  normalizeForLookup(value) {
+    if (!value || typeof value !== 'string') {
+      return '';
+    }
+
+    return value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  levenshteinDistance(a, b) {
+    if (!a) return b.length;
+    if (!b) return a.length;
+
+    const matrix = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+
+    for (let i = 0; i <= a.length; i += 1) {
+      matrix[i][0] = i;
+    }
+    for (let j = 0; j <= b.length; j += 1) {
+      matrix[0][j] = j;
+    }
+
+    for (let i = 1; i <= a.length; i += 1) {
+      for (let j = 1; j <= b.length; j += 1) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + cost
+        );
+      }
+    }
+
+    return matrix[a.length][b.length];
+  }
+
+  hasSingleAdjacentTransposition(a, b) {
+    if (!a || !b || a.length !== b.length) {
+      return false;
+    }
+
+    const diffIndexes = [];
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) {
+        diffIndexes.push(i);
+      }
+      if (diffIndexes.length > 2) {
+        return false;
+      }
+    }
+
+    if (diffIndexes.length !== 2) {
+      return false;
+    }
+
+    const [firstIndex, secondIndex] = diffIndexes;
+    return secondIndex === firstIndex + 1 &&
+      a[firstIndex] === b[secondIndex] &&
+      a[secondIndex] === b[firstIndex];
+  }
+
+  findBestFuzzyMatch(inputValue, candidates, options = {}) {
+    const normalizedInput = this.normalizeForLookup(inputValue);
+    if (!normalizedInput) {
+      return null;
+    }
+
+    const minLength = options.minLength || 5;
+    const minSimilarity = options.minSimilarity || 0.82;
+    let bestMatch = null;
+    let bestScore = 0;
+
+    for (const candidate of candidates) {
+      if (!candidate?.name) {
+        continue;
+      }
+
+      const normalizedCandidate = this.normalizeForLookup(candidate.name);
+      if (!normalizedCandidate) {
+        continue;
+      }
+
+      if (normalizedCandidate === normalizedInput) {
+        return candidate;
+      }
+
+      const maxLen = Math.max(normalizedInput.length, normalizedCandidate.length);
+      if (maxLen < minLength) {
+        continue;
+      }
+
+      if (Math.abs(normalizedInput.length - normalizedCandidate.length) > 2) {
+        continue;
+      }
+
+      if (normalizedInput[0] !== normalizedCandidate[0]) {
+        continue;
+      }
+
+      const transpositionMatch = this.hasSingleAdjacentTransposition(normalizedInput, normalizedCandidate);
+      if (transpositionMatch) {
+        return candidate;
+      }
+
+      const distance = this.levenshteinDistance(normalizedInput, normalizedCandidate);
+      const maxDistance = Math.max(2, Math.floor(maxLen * 0.22));
+      const similarity = 1 - (distance / maxLen);
+
+      if (distance <= maxDistance && similarity >= minSimilarity && similarity > bestScore) {
+        bestScore = similarity;
+        bestMatch = candidate;
+      }
+    }
+
+    return bestMatch;
+  }
+
+  parseDocumentDate(value) {
+    if (!value || typeof value !== 'string') {
+      return null;
+    }
+
+    const parsers = [
+      () => parseISO(value),
+      () => parse(value, 'yyyy-MM-dd', new Date()),
+      () => parse(value, 'dd.MM.yyyy', new Date()),
+      () => parse(value, 'dd-MM-yyyy', new Date()),
+      () => parse(value, 'MM/dd/yyyy', new Date()),
+      () => parse(value, 'yyyy/MM/dd', new Date())
+    ];
+
+    for (const parser of parsers) {
+      try {
+        const parsedDate = parser();
+        if (isValid(parsedDate)) {
+          return parsedDate;
+        }
+      } catch (error) {
+        // Ignore parser errors and try the next format.
+      }
+    }
+
+    return null;
   }
 
   async getThumbnailImage(documentId) {
@@ -75,6 +228,7 @@ class PaperlessService {
       try {
         console.log('[DEBUG] Refreshing tag cache...');
         this.tagCache.clear();
+        this.tagNormalizedCache.clear();
         let nextUrl = '/tags/';
         while (nextUrl) {
           const response = await this.client.get(nextUrl);
@@ -87,6 +241,10 @@ class PaperlessService {
 
           response.data.results.forEach(tag => {
             this.tagCache.set(tag.name.toLowerCase(), tag);
+            const normalizedName = this.normalizeForLookup(tag.name);
+            if (normalizedName) {
+              this.tagNormalizedCache.set(normalizedName, tag);
+            }
           });
 
           // Fix: Extract only path and query from next URL to prevent HTTP downgrade
@@ -266,12 +424,20 @@ class PaperlessService {
 
   async findExistingTag(tagName) {
     const normalizedName = tagName.toLowerCase();
+    const normalizedLookup = this.normalizeForLookup(tagName);
     
     // 1. Zuerst im Cache suchen
     const cachedTag = this.tagCache.get(normalizedName);
     if (cachedTag) {
       console.log(`[DEBUG] Found tag "${tagName}" in cache with ID ${cachedTag.id}`);
       return cachedTag;
+    }
+
+    const normalizedCachedTag = this.tagNormalizedCache.get(normalizedLookup);
+    if (normalizedCachedTag) {
+      console.log(`[DEBUG] Found normalized tag "${tagName}" in cache with ID ${normalizedCachedTag.id}`);
+      this.tagCache.set(normalizedName, normalizedCachedTag);
+      return normalizedCachedTag;
     }
 
     // 2. Direkte API-Suche
@@ -286,6 +452,9 @@ class PaperlessService {
         const foundTag = response.data.results[0];
         console.log(`[DEBUG] Found existing tag "${tagName}" via API with ID ${foundTag.id}`);
         this.tagCache.set(normalizedName, foundTag);
+        if (normalizedLookup) {
+          this.tagNormalizedCache.set(normalizedLookup, foundTag);
+        }
         return foundTag;
       }
     } catch (error) {
@@ -297,6 +466,7 @@ class PaperlessService {
 
   async createTagSafely(tagName) {
     const normalizedName = tagName.toLowerCase();
+    const normalizedLookup = this.normalizeForLookup(tagName);
     
     try {
       // Versuche zuerst, den Tag zu erstellen
@@ -304,6 +474,9 @@ class PaperlessService {
       const newTag = response.data;
       console.log(`[DEBUG] Successfully created tag "${tagName}" with ID ${newTag.id}`);
       this.tagCache.set(normalizedName, newTag);
+      if (normalizedLookup) {
+        this.tagNormalizedCache.set(normalizedLookup, newTag);
+      }
       return newTag;
     } catch (error) {
       if (error.response?.status === 400) {
@@ -319,6 +492,15 @@ class PaperlessService {
       }
       throw error; // Wenn wir den Tag nicht finden konnten, werfen wir den Fehler weiter
     }
+  }
+
+  findSimilarTag(tagName) {
+    const candidates = [...this.tagCache.values()];
+    const fuzzyMatch = this.findBestFuzzyMatch(tagName, candidates);
+    if (fuzzyMatch) {
+      console.log(`[DEBUG] Fuzzy matched tag "${tagName}" to existing tag "${fuzzyMatch.name}" (${fuzzyMatch.id})`);
+    }
+    return fuzzyMatch;
   }
 
   async processTags(tagNames, options = {}) {
@@ -374,6 +556,11 @@ class PaperlessService {
         try {
           // Search for existing tag first
           let tag = await this.findExistingTag(tagName);
+
+          // Resolve likely typos against existing tags before creating/skipping
+          if (!tag) {
+            tag = this.findSimilarTag(tagName);
+          }
           
           // If no existing tag found and restrictions are not enabled, create new one
           if (!tag && !restrictToExistingTags) {
@@ -1194,102 +1381,164 @@ async searchForExistingCorrespondent(correspondent) {
     }
 }
 
-async searchForExistingDocumentType(documentType) {
+async ensureDocumentTypeCache() {
+  const now = Date.now();
+  if (this.documentTypeCache.size === 0 || (now - this.lastDocumentTypeRefresh) > this.CACHE_LIFETIME) {
+    await this.refreshDocumentTypeCache();
+  }
+}
+
+async refreshDocumentTypeCache() {
+  this.initialize();
   try {
-      const response = await this.client.get('/document_types/', {
-          params: {
-              name__icontains: documentType
-          }
+    this.documentTypeCache.clear();
+    this.documentTypeNormalizedCache.clear();
+
+    let nextUrl = '/document_types/';
+    while (nextUrl) {
+      const response = await this.client.get(nextUrl);
+      if (!response?.data?.results) {
+        break;
+      }
+
+      response.data.results.forEach(documentType => {
+        this.documentTypeCache.set(documentType.name.toLowerCase(), documentType);
+        const normalizedName = this.normalizeForLookup(documentType.name);
+        if (normalizedName) {
+          this.documentTypeNormalizedCache.set(normalizedName, documentType);
+        }
       });
 
-      const results = response.data.results;
-      
-      if (results.length === 0) {
-          console.log(`[DEBUG] No document type with name "${documentType}" found`);
-          return null;
+      if (response.data.next) {
+        try {
+          const nextUrlObj = new URL(response.data.next);
+          const baseUrlObj = new URL(this.client.defaults.baseURL);
+          let relativePath = nextUrlObj.pathname;
+          if (baseUrlObj.pathname && baseUrlObj.pathname !== '/') {
+            relativePath = relativePath.replace(baseUrlObj.pathname, '');
+          }
+          if (!relativePath.startsWith('/')) {
+            relativePath = `/${relativePath}`;
+          }
+          nextUrl = relativePath + nextUrlObj.search;
+        } catch (error) {
+          nextUrl = null;
+        }
+      } else {
+        nextUrl = null;
       }
-      
-      // Check for exact match in the results
-      const exactMatch = results.find(dt => dt.name.toLowerCase() === documentType.toLowerCase());
-      if (exactMatch) {
-          console.log(`[DEBUG] Found exact match for document type "${documentType}" with ID ${exactMatch.id}`);
-          return {
-              id: exactMatch.id,
-              name: exactMatch.name
-          };
-      }
+    }
 
-      // No exact match found, return null
-      console.log(`[DEBUG] No exact match found for "${documentType}"`);
-      return null;
-
+    this.lastDocumentTypeRefresh = Date.now();
+    console.log(`[DEBUG] Document type cache refreshed. Found ${this.documentTypeCache.size} types.`);
   } catch (error) {
-      console.error('[ERROR] while searching for existing document type:', error.message);
-      throw error;
+    console.error('[ERROR] refreshing document type cache:', error.message);
+    throw error;
   }
+}
+
+findSimilarDocumentType(documentType) {
+  const candidates = [...this.documentTypeCache.values()];
+  const fuzzyMatch = this.findBestFuzzyMatch(documentType, candidates);
+  if (fuzzyMatch) {
+    console.log(`[DEBUG] Fuzzy matched document type "${documentType}" to "${fuzzyMatch.name}" (${fuzzyMatch.id})`);
+  }
+  return fuzzyMatch;
+}
+
+async searchForExistingDocumentType(documentType) {
+  await this.ensureDocumentTypeCache();
+
+  const normalizedInput = this.normalizeForLookup(documentType);
+  if (!normalizedInput) {
+    return null;
+  }
+
+  const cachedExact = this.documentTypeCache.get(documentType.toLowerCase().trim());
+  if (cachedExact) {
+    return { id: cachedExact.id, name: cachedExact.name };
+  }
+
+  const cachedNormalized = this.documentTypeNormalizedCache.get(normalizedInput);
+  if (cachedNormalized) {
+    return { id: cachedNormalized.id, name: cachedNormalized.name };
+  }
+
+  const fuzzyMatch = this.findSimilarDocumentType(documentType);
+  if (fuzzyMatch) {
+    return { id: fuzzyMatch.id, name: fuzzyMatch.name };
+  }
+
+  try {
+    const response = await this.client.get('/document_types/', {
+      params: {
+        name__icontains: documentType
+      }
+    });
+
+    const exactMatch = response.data.results.find(dt => dt.name.toLowerCase() === documentType.toLowerCase());
+    if (exactMatch) {
+      return { id: exactMatch.id, name: exactMatch.name };
+    }
+  } catch (error) {
+    console.error('[ERROR] while searching for existing document type:', error.message);
+    throw error;
+  }
+
+  console.log(`[DEBUG] No document type with name "${documentType}" found`);
+  return null;
 }
 
 async getOrCreateDocumentType(name, options = {}) {
   this.initialize();
 
-  // Check if we should restrict to existing document types
-  // Explicitly check options first, then env var
   const restrictToExistingDocumentTypes = options.restrictToExistingDocumentTypes === true ||
-                                         (options.restrictToExistingDocumentTypes === undefined &&
-                                          process.env.RESTRICT_TO_EXISTING_DOCUMENT_TYPES === 'yes');
+    (options.restrictToExistingDocumentTypes === undefined &&
+      process.env.RESTRICT_TO_EXISTING_DOCUMENT_TYPES === 'yes');
 
   console.log(`[DEBUG] Processing document type with restrictToExistingDocumentTypes=${restrictToExistingDocumentTypes}`);
 
   try {
-      // Suche nach existierendem document_type
-      const existingDocType = await this.searchForExistingDocumentType(name);
-      console.log("[DEBUG] Response Document Type Search: ", existingDocType);
+    const existingDocType = await this.searchForExistingDocumentType(name);
+    console.log('[DEBUG] Response Document Type Search: ', existingDocType);
 
-      if (existingDocType) {
-          console.log(`[DEBUG] Found existing document type "${name}" with ID ${existingDocType.id}`);
-          return existingDocType;
-      }
+    if (existingDocType) {
+      console.log(`[DEBUG] Found existing document type "${name}" with ID ${existingDocType.id}`);
+      return existingDocType;
+    }
 
-      // If we're restricting to existing document types and none was found, return null
-      if (restrictToExistingDocumentTypes) {
-          console.log(`[DEBUG] Document type "${name}" does not exist and restrictions are enabled, returning null`);
-          return null;
-      }
+    if (restrictToExistingDocumentTypes) {
+      console.log(`[DEBUG] Document type "${name}" does not exist and restrictions are enabled, returning null`);
+      return null;
+    }
 
-      // Erstelle neuen document_type
-      try {
-          const createResponse = await this.client.post('/document_types/', {
-              name: name,
-              matching_algorithm: 1, // 1 = ANY
-              match: "",  // Optional: Kann später angepasst werden
-              is_insensitive: true,
-              owner: null
-          });
-          console.log(`[DEBUG] Created new document type "${name}" with ID ${createResponse.data.id}`);
-          return createResponse.data;
-      } catch (createError) {
-          if (createError.response?.status === 400 && 
-              createError.response?.data?.error?.includes('unique constraint')) {
-            
-              // Race condition check
-              const retryResponse = await this.client.get('/document_types/', {
-                  params: { name: name }
-              });
-            
-              const justCreatedDocType = retryResponse.data.results.find(
-                  dt => dt.name.toLowerCase() === name.toLowerCase()
-              );
-            
-              if (justCreatedDocType) {
-                  console.log(`[DEBUG] Retrieved document type "${name}" after constraint error with ID ${justCreatedDocType.id}`);
-                  return justCreatedDocType;
-              }
-          }
-          throw createError;
+    try {
+      const createResponse = await this.client.post('/document_types/', {
+        name: name,
+        matching_algorithm: 1,
+        match: '',
+        is_insensitive: true,
+        owner: null
+      });
+      console.log(`[DEBUG] Created new document type "${name}" with ID ${createResponse.data.id}`);
+      const createdDocType = createResponse.data;
+      this.documentTypeCache.set(createdDocType.name.toLowerCase(), createdDocType);
+      const normalizedName = this.normalizeForLookup(createdDocType.name);
+      if (normalizedName) {
+        this.documentTypeNormalizedCache.set(normalizedName, createdDocType);
       }
+      return createdDocType;
+    } catch (createError) {
+      if (createError.response?.status === 400 &&
+          createError.response?.data?.error?.includes('unique constraint')) {
+        await this.refreshDocumentTypeCache();
+        return await this.searchForExistingDocumentType(name);
+      }
+      throw createError;
+    }
   } catch (error) {
-      console.error(`[ERROR] Failed to process document type "${name}":`, error.message);
-      throw error;
+    console.error(`[ERROR] Failed to process document type "${name}":`, error.message);
+    throw error;
   }
 }
 
@@ -1477,45 +1726,43 @@ async getOrCreateDocumentType(name, options = {}) {
       let updateData = { ...updates };
       try {
         if (updates.created) {
-          const createdValue = String(updates.created).trim();
-          let dateObject = parseISO(createdValue);
+          const dateObject = this.parseDocumentDate(String(updates.created).trim());
+          const currentDateObject = this.parseDocumentDate(currentDoc.created);
 
-          if (!isValid(dateObject)) {
-            const dateFormats = [
-              'dd.MM.yyyy',
-              'dd-MM-yyyy',
-              'dd/MM/yyyy',
-              'MM/dd/yyyy',
-              'yyyy/MM/dd'
-            ];
-
-            for (const dateFormat of dateFormats) {
-              dateObject = parse(createdValue, dateFormat, new Date());
-              if (isValid(dateObject)) {
-                break;
-              }
+          if (!dateObject) {
+            if (currentDateObject) {
+              console.warn(`[WARN] Invalid date format: ${updates.created}, keeping current date ${currentDoc.created}`);
+              updateData.created = format(currentDateObject, 'yyyy-MM-dd');
+            } else {
+              console.warn(`[WARN] Invalid date format: ${updates.created}, skipping created date update`);
+              delete updateData.created;
             }
-          }
-
-          if (isValid(dateObject)) {
+          } else {
             const normalizedCreated = format(dateObject, 'yyyy-MM-dd');
             const today = format(new Date(), 'yyyy-MM-dd');
+            const parsedYear = dateObject.getFullYear();
+            const suspiciousLegacyYear = parsedYear <= 1991;
+            const currentYearValue = currentDateObject ? currentDateObject.getFullYear() : null;
 
             if (normalizedCreated > today) {
               console.warn(`[WARN] Future created date received (${normalizedCreated}), skipping created date update`);
               delete updateData.created;
+            } else if (suspiciousLegacyYear && currentYearValue && currentYearValue > 1991) {
+              console.warn(`[WARN] Suspicious legacy created date (${normalizedCreated}), keeping current date ${currentDoc.created}`);
+              updateData.created = format(currentDateObject, 'yyyy-MM-dd');
             } else {
               updateData.created = normalizedCreated;
             }
-          } else {
-            console.warn(`[WARN] Invalid date format: ${updates.created}, skipping created date update`);
-            delete updateData.created;
           }
         }
       } catch (error) {
         console.warn('[WARN] Error parsing date:', error.message);
         console.warn('[DEBUG] Received Date:', updates);
-        delete updateData.created;
+        if (currentDoc?.created) {
+          updateData.created = currentDoc.created;
+        } else {
+          delete updateData.created;
+        }
       }
 
       if (Array.isArray(updateData.custom_fields)) {

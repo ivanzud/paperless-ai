@@ -5,6 +5,7 @@ const fs = require('fs').promises;
 const config = require('./config/config');
 const paperlessService = require('./services/paperlessService');
 const AIServiceFactory = require('./services/aiServiceFactory');
+const metadataNormalizationService = require('./services/metadataNormalizationService');
 const documentModel = require('./models/document');
 const setupService = require('./services/setupService');
 const setupRoutes = require('./routes/setup');
@@ -237,8 +238,12 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
   }
 }
 
-async function buildUpdateData(analysis, doc) {
+async function buildUpdateData(analysis, doc, existingTags = [], existingDocumentTypes = []) {
   const updateData = {};
+  const normalizedDocument = metadataNormalizationService.normalizeAnalysisDocument(
+    analysis?.document || {},
+    { currentDoc: doc, maxTags: 4 }
+  );
 
   console.log('TEST: ', config.addAIProcessedTag)
   console.log('TEST 2: ', config.addAIProcessedTags)
@@ -248,7 +253,7 @@ async function buildUpdateData(analysis, doc) {
 
   // Only process tags if tagging is activated
   if (config.limitFunctions?.activateTagging !== 'no') {
-    let aiTags = analysis.document.tags || [];
+    let aiTags = normalizedDocument.tags || [];
     
     // Handle cases where Gemini returns a comma-separated string instead of an array
     if (!Array.isArray(aiTags)) {
@@ -270,7 +275,10 @@ async function buildUpdateData(analysis, doc) {
       allTagsToProcess = allTagsToProcess.concat(defaultTags);
     }
 
-    const { tagIds, errors } = await paperlessService.processTags(allTagsToProcess);
+    const { tagIds, errors } = await paperlessService.processTags(allTagsToProcess, {
+      restrictToExistingTags: config.restrictToExistingTags === 'yes',
+      existingTags
+    });
     if (errors.length > 0) {
       console.warn('[ERROR] Some tags could not be processed:', errors);
     }
@@ -290,16 +298,19 @@ async function buildUpdateData(analysis, doc) {
 
   // Only process title if title generation is activated
   if (config.limitFunctions?.activateTitle !== 'no') {
-    updateData.title = analysis.document.title || doc.title;
+    updateData.title = normalizedDocument.title || doc.title;
   }
 
   // Add created date regardless of settings as it's a core field
-  updateData.created = analysis.document.document_date || doc.created;
+  updateData.created = normalizedDocument.document_date || doc.created;
 
   // Only process document type if document type classification is activated
-  if (config.limitFunctions?.activateDocumentType !== 'no' && analysis.document.document_type) {
+  if (config.limitFunctions?.activateDocumentType !== 'no' && normalizedDocument.document_type) {
     try {
-      const documentType = await paperlessService.getOrCreateDocumentType(analysis.document.document_type);
+      const documentType = await paperlessService.getOrCreateDocumentType(normalizedDocument.document_type, {
+        restrictToExistingDocumentTypes: config.restrictToExistingDocumentTypes === 'yes',
+        existingDocumentTypes
+      });
       if (documentType) {
         updateData.document_type = documentType.id;
       }
@@ -309,8 +320,8 @@ async function buildUpdateData(analysis, doc) {
   }
   
   // Only process custom fields if custom fields detection is activated
-  if (config.limitFunctions?.activateCustomFields !== 'no' && analysis.document.custom_fields) {
-    const customFields = analysis.document.custom_fields;
+  if (config.limitFunctions?.activateCustomFields !== 'no' && normalizedDocument.custom_fields) {
+    const customFields = normalizedDocument.custom_fields;
     const processedFields = [];
 
     // Get existing custom fields
@@ -373,9 +384,9 @@ async function buildUpdateData(analysis, doc) {
   }
 
   // Only process correspondent if correspondent detection is activated
-  if (config.limitFunctions?.activateCorrespondents !== 'no' && analysis.document.correspondent) {
+  if (config.limitFunctions?.activateCorrespondents !== 'no' && normalizedDocument.correspondent) {
     try {
-      const correspondent = await paperlessService.getOrCreateCorrespondent(analysis.document.correspondent);
+      const correspondent = await paperlessService.getOrCreateCorrespondent(normalizedDocument.correspondent);
       if (correspondent) {
         updateData.correspondent = correspondent.id;
       }
@@ -385,8 +396,8 @@ async function buildUpdateData(analysis, doc) {
   }
 
   // Always include language if provided as it's a core field
-  if (analysis.document.language) {
-    updateData.language = analysis.document.language;
+  if (normalizedDocument.language) {
+    updateData.language = normalizedDocument.language;
   }
 
   if (analysis.document.notes && typeof analysis.document.notes === 'string') {
@@ -445,7 +456,7 @@ async function scanInitial() {
         if (!result) continue;
 
         const { analysis, originalData } = result;
-        const updateData = await buildUpdateData(analysis, doc);
+        const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, error);
@@ -490,7 +501,7 @@ async function scanDocuments() {
         if (!result) continue;
 
         const { analysis, originalData } = result;
-        const updateData = await buildUpdateData(analysis, doc);
+        const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, error);

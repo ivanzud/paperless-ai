@@ -127,6 +127,8 @@ module.exports = {
     "notes": "Optional short note about the document"
   }`,
   mustHavePrompt: `  Return the result EXCLUSIVELY as a JSON object. The Tags, Title and Document_Type MUST be in the language that is used in the document.:
+  If lists of existing tags/correspondents/document types are provided, copy names with exact spelling from those lists.
+  Never invent close variants, alternate spellings, or typo versions of existing values.
   IMPORTANT: The custom_fields are optional and can be left out if not needed, only try to fill out the values if you find a matching information in the document.
   Do not change the value of field_name, only fill out the values. If the field is about money only add the number without currency and always use a . for decimal places.
   %EXISTING_CORRESPONDENTS%
