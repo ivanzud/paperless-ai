@@ -24,9 +24,25 @@ class OllamaService {
         this.apiUrl = config.ollama.apiUrl;
         this.model = config.ollama.model;
         this.keepAlive = config.ollama.keepAlive;
+        const configuredTimeoutMs = Number(config.ollama.timeoutMs);
+        this.timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+            ? configuredTimeoutMs
+            : 1800000;
+        const configuredMaxRetries = Number(config.ollama.maxRetries);
+        this.maxRetries = Number.isFinite(configuredMaxRetries) && configuredMaxRetries >= 0
+            ? Math.floor(configuredMaxRetries)
+            : 2;
+        const configuredRetryBaseDelayMs = Number(config.ollama.retryBaseDelayMs);
+        this.retryBaseDelayMs = Number.isFinite(configuredRetryBaseDelayMs) && configuredRetryBaseDelayMs > 0
+            ? configuredRetryBaseDelayMs
+            : 1000;
+        const configuredRetryMaxDelayMs = Number(config.ollama.retryMaxDelayMs);
+        this.retryMaxDelayMs = Number.isFinite(configuredRetryMaxDelayMs) && configuredRetryMaxDelayMs > 0
+            ? configuredRetryMaxDelayMs
+            : 10000;
         this.unloadInProgress = null;
         this.client = axios.create({
-            timeout: 1800000 // 30 minutes timeout
+            timeout: this.timeoutMs
         });
 
         // JSON schema for document analysis output
@@ -82,6 +98,71 @@ class OllamaService {
 
     _applyKeepAlive(requestBody) {
         requestBody.keep_alive = this._getKeepAlive();
+    }
+
+    _isTransientNetworkError(error) {
+        const status = Number(error?.response?.status);
+        if (status === 408 || status === 429 || (status >= 500 && status <= 599)) {
+            return true;
+        }
+
+        const code = String(error?.code || error?.cause?.code || error?.errno || '').toUpperCase();
+        const transientCodes = new Set([
+            'ETIMEDOUT',
+            'ESOCKETTIMEDOUT',
+            'ECONNABORTED',
+            'ECONNRESET',
+            'ECONNREFUSED',
+            'EHOSTUNREACH',
+            'ENETUNREACH',
+            'ENOTFOUND'
+        ]);
+        if (transientCodes.has(code)) {
+            return true;
+        }
+
+        const message = String(error?.message || '').toLowerCase();
+        return (
+            message.includes('timed out') ||
+            message.includes('timeout') ||
+            message.includes('socket hang up') ||
+            message.includes('network error') ||
+            message.includes('connection reset')
+        );
+    }
+
+    _getRetryDelayMs(attempt) {
+        const exponential = this.retryBaseDelayMs * (2 ** Math.max(0, attempt - 1));
+        return Math.min(this.retryMaxDelayMs, exponential);
+    }
+
+    async _sleep(ms) {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async _postGenerateWithRetry(requestBody, context) {
+        const maxAttempts = this.maxRetries + 1;
+        let lastError;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            try {
+                return await this.client.post(`${this.apiUrl}/api/generate`, requestBody);
+            } catch (error) {
+                lastError = error;
+                if (!this._isTransientNetworkError(error) || attempt === maxAttempts) {
+                    throw error;
+                }
+
+                const delayMs = this._getRetryDelayMs(attempt);
+                console.warn(
+                    `[WARNING] Ollama ${context} failed (${error.code || error.message}). ` +
+                    `Retrying ${attempt + 1}/${maxAttempts} after ${delayMs}ms.`
+                );
+                await this._sleep(delayMs);
+            }
+        }
+
+        throw lastError;
     }
 
     async unloadModel() {
@@ -151,7 +232,7 @@ class OllamaService {
             // Build prompt
             let prompt;
             if (!customPrompt) {
-                prompt = this._buildPrompt(content, existingTags, existingCorrespondentList, existingDocumentTypesList, options);
+                prompt = await this._buildPrompt(content, existingTags, existingCorrespondentList, existingDocumentTypesList, options);
             } else {
                 // Parse CUSTOM_FIELDS for custom prompt
                 let customFieldsObj;
@@ -306,7 +387,7 @@ class OllamaService {
      * @param {Array} existingDocumentTypes - List of existing document types
      * @returns {string} Formatted prompt
      */
-    _buildPrompt(content, existingTags = [], existingCorrespondent = [], existingDocumentTypes = [], options = {}) {
+    async _buildPrompt(content, existingTags = [], existingCorrespondent = [], existingDocumentTypes = [], options = {}) {
         let systemPrompt;
         let promptTags = '';
 
@@ -370,15 +451,21 @@ class OllamaService {
                 .filter(name => name.length > 0)  // Remove empty strings
                 .join(', ');
 
+            const baseMustHavePrompt = config.mustHavePrompt
+                .replace('%CUSTOMFIELDS%', customFieldsStr)
+                .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+
             systemPrompt = `
             Pre-existing tags: ${existingTagsList}\n\n
             Pre-existing correspondents: ${existingCorrespondentList}\n\n
             Pre-existing document types: ${existingDocumentTypesList}\n\n
-            ` + process.env.SYSTEM_PROMPT + '\n\n' + config.mustHavePrompt.replace('%CUSTOMFIELDS%', customFieldsStr).replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+            ` + process.env.SYSTEM_PROMPT + '\n\n' + baseMustHavePrompt;
             promptTags = '';
         } else {
-            config.mustHavePrompt = config.mustHavePrompt.replace('%CUSTOMFIELDS%', customFieldsStr).replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
-            systemPrompt = process.env.SYSTEM_PROMPT + '\n\n' + config.mustHavePrompt;
+            const baseMustHavePrompt = config.mustHavePrompt
+                .replace('%CUSTOMFIELDS%', customFieldsStr)
+                .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+            systemPrompt = process.env.SYSTEM_PROMPT + '\n\n' + baseMustHavePrompt;
             promptTags = '';
         }
 
@@ -386,7 +473,7 @@ class OllamaService {
         let validatedExternalApiData = null;
         if (options.externalApiData) {
             try {
-                validatedExternalApiData = this._validateAndTruncateExternalApiData(options.externalApiData);
+                validatedExternalApiData = await this._validateAndTruncateExternalApiData(options.externalApiData);
                 console.log('[DEBUG] External API data validated and included');
             } catch (error) {
                 console.warn('[WARNING] External API data validation failed:', error.message);
@@ -622,7 +709,7 @@ class OllamaService {
         };
         this._applyKeepAlive(requestBody);
 
-        const response = await this.client.post(`${this.apiUrl}/api/generate`, requestBody);
+        const response = await this._postGenerateWithRetry(requestBody, 'analysis request');
 
         if (!response.data) {
             throw new Error('Invalid response from Ollama API');
@@ -810,7 +897,7 @@ class OllamaService {
             this._applyKeepAlive(requestBody);
 
             // Call Ollama API without enforcing a specific response format
-            const response = await this.client.post(`${this.apiUrl}/api/generate`, requestBody);
+            const response = await this._postGenerateWithRetry(requestBody, 'text generation');
 
             if (!response.data || !response.data.response) {
                 throw new Error('Invalid response from Ollama API');
