@@ -106,10 +106,64 @@ def _parse_bool_env(var_name: str, default: bool) -> bool:
     )
     return default
 
-# Download NLTK resources if not present
-nltk.download('punkt', quiet=True)
-nltk.download('punkt_tab', quiet=True)
-nltk.download('stopwords', quiet=True)
+TOKEN_PATTERN = re.compile(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_'-]+", re.UNICODE)
+TOKENIZER_FALLBACK_WARNED = False
+STOPWORDS_FALLBACK_WARNED = False
+
+
+def _ensure_nltk_resource(resource_path: str, download_name: str) -> bool:
+    try:
+        nltk.data.find(resource_path)
+        return True
+    except LookupError:
+        try:
+            nltk.download(download_name, quiet=True)
+            nltk.data.find(resource_path)
+            return True
+        except Exception as exc:
+            logger.warning(
+                "NLTK resource '%s' unavailable (%s). Falling back to lightweight token handling.",
+                download_name,
+                exc,
+            )
+            return False
+
+
+def safe_word_tokenize(text: str) -> List[str]:
+    global TOKENIZER_FALLBACK_WARNED
+    normalized = (text or "").lower()
+    if not normalized:
+        return []
+
+    try:
+        return word_tokenize(normalized)
+    except LookupError:
+        if not TOKENIZER_FALLBACK_WARNED:
+            logger.warning("NLTK punkt tokenizer missing. Using regex fallback tokenization.")
+            TOKENIZER_FALLBACK_WARNED = True
+        return TOKEN_PATTERN.findall(normalized)
+
+
+def get_multilingual_stopwords() -> set:
+    global STOPWORDS_FALLBACK_WARNED
+    stop_words = set()
+    for lang in ['english', 'german', 'french', 'spanish', 'italian']:
+        try:
+            stop_words.update(stopwords.words(lang))
+        except LookupError:
+            if not STOPWORDS_FALLBACK_WARNED:
+                logger.warning("NLTK stopwords corpus missing. Continuing without stopword filtering.")
+                STOPWORDS_FALLBACK_WARNED = True
+            break
+        except Exception:
+            continue
+    return stop_words
+
+
+# Best-effort warm-up; runtime gracefully falls back if downloads are blocked.
+_ensure_nltk_resource('tokenizers/punkt', 'punkt')
+_ensure_nltk_resource('tokenizers/punkt_tab', 'punkt_tab')
+_ensure_nltk_resource('corpora/stopwords', 'stopwords')
 
 # Status und Konfiguration
 class IndexingStatus(BaseModel):
@@ -900,13 +954,7 @@ class SearchEngine:
         # Prepare corpus for BM25
         self.tokenized_corpus = []
         
-        # Get stopwords for multiple languages
-        stop_words = set()
-        for lang in ['english', 'german', 'french', 'spanish', 'italian']:
-            try:
-                stop_words.update(stopwords.words(lang))
-            except:
-                pass
+        stop_words = get_multilingual_stopwords()
         
         # Tokenize documents
         for doc in tqdm(self.documents, desc="Tokenizing documents for BM25"):
@@ -914,7 +962,7 @@ class SearchEngine:
             text = f"{doc['title']} {doc['correspondent']} {doc['content']}"
             
             # Tokenize and filter stopwords
-            tokens = word_tokenize(text.lower())
+            tokens = safe_word_tokenize(text)
             filtered_tokens = [token for token in tokens if token not in stop_words]
             
             self.tokenized_corpus.append(filtered_tokens)
@@ -993,13 +1041,7 @@ class SearchEngine:
                 self._setup_bm25()  # Rebuild from scratch
                 return
             
-            # Get stopwords for multiple languages
-            stop_words = set()
-            for lang in ['english', 'german', 'french', 'spanish', 'italian']:
-                try:
-                    stop_words.update(stopwords.words(lang))
-                except:
-                    pass
+            stop_words = get_multilingual_stopwords()
             
             # Create a map for quick document lookup by ID
             documents_by_id = {doc["id"]: doc for doc in self.documents}
@@ -1012,7 +1054,7 @@ class SearchEngine:
                     
                     # Tokenize the document
                     text = f"{doc['title']} {doc['correspondent']} {doc['content']}"
-                    tokens = word_tokenize(text.lower())
+                    tokens = safe_word_tokenize(text)
                     filtered_tokens = [token for token in tokens if token not in stop_words]
                     
                     # Add to the tokenized corpus
@@ -1054,7 +1096,7 @@ class SearchEngine:
             raise Exception("BM25 index does not match document count")
             
         # Tokenize query
-        query_tokens = word_tokenize(query.lower())
+        query_tokens = safe_word_tokenize(query)
         
         # Get BM25 scores
         scores = self.bm25.get_scores(query_tokens)
@@ -1292,7 +1334,7 @@ class SearchEngine:
         
         try:
             # Get query terms
-            query_terms = set(word_tokenize(query.lower()))
+            query_terms = set(safe_word_tokenize(query))
             
             # Split content into sentences
             sentences = content.split(". ")
@@ -1300,7 +1342,7 @@ class SearchEngine:
             # Score sentences by number of query terms
             sentence_scores = []
             for sentence in sentences:
-                sentence_terms = set(word_tokenize(sentence.lower()))
+                sentence_terms = set(safe_word_tokenize(sentence))
                 score = len(query_terms.intersection(sentence_terms))
                 sentence_scores.append((sentence, score))
             

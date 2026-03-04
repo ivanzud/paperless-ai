@@ -38,9 +38,9 @@ const result1 = RestrictionPromptService.processRestrictionsInPrompt(
 console.log('Original prompt:');
 console.log(promptWithPlaceholders);
 console.log('\nProcessed prompt:');
-console.log(result1.processedPrompt);
-console.log('\nRestriction prompts:');
-console.log(result1.restrictionPrompts);
+console.log(result1);
+console.log('\nType of result:');
+console.log(typeof result1);
 
 console.log('\n' + '='.repeat(50) + '\n');
 
@@ -58,9 +58,9 @@ const result2 = RestrictionPromptService.processRestrictionsInPrompt(
 console.log('Original prompt:');
 console.log(promptWithoutPlaceholders);
 console.log('\nProcessed prompt:');
-console.log(result2.processedPrompt);
-console.log('\nRestriction prompts:');
-console.log(result2.restrictionPrompts);
+console.log(result2);
+console.log('\nType of result:');
+console.log(typeof result2);
 
 console.log('\n' + '='.repeat(50) + '\n');
 
@@ -76,8 +76,8 @@ const result3 = RestrictionPromptService.processRestrictionsInPrompt(
 console.log('Original prompt:');
 console.log(promptWithPlaceholders);
 console.log('\nProcessed prompt (with empty data):');
-console.log(result3.processedPrompt);
-console.log('\nRestriction prompts:');
-console.log(result3.restrictionPrompts);
+console.log(result3);
+console.log('\nType of result:');
+console.log(typeof result3);
 
 console.log('\n=== Test Complete ===');
