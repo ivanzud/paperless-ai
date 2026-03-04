@@ -1671,39 +1671,38 @@ async def startup_event():
         if documents_exist:
             logger.info("Found existing data, loading without reindexing")
             
-            # Just load the documents from the file (no API calls, no reindexing)
-            if not global_state.system_status.data_loaded:
-                try:
-                    # Load documents without checking for new ones
-                    global_state.data_manager.documents = []
-                    with open(DOCUMENTS_FILE, 'r', encoding='utf-8') as f:
-                        loaded_docs = json.load(f)
-                        
-                        # Validate document structure
-                        if not isinstance(loaded_docs, list) or (loaded_docs and not isinstance(loaded_docs[0], dict)):
-                            logger.error("Invalid document structure in documents.json")
-                            raise ValueError("Invalid document structure in documents.json")
-                            
-                        global_state.data_manager.documents = loaded_docs
+            # Always load documents from local cache on startup to ensure in-memory
+            # state matches persisted documents, regardless of prior status flags.
+            try:
+                global_state.data_manager.documents = []
+                with open(DOCUMENTS_FILE, 'r', encoding='utf-8') as f:
+                    loaded_docs = json.load(f)
                     
-                    # Update state
-                    global_state.system_status.data_loaded = True
-                    doc_count = len(global_state.data_manager.documents)
+                    # Validate document structure
+                    if not isinstance(loaded_docs, list) or (loaded_docs and not isinstance(loaded_docs[0], dict)):
+                        logger.error("Invalid document structure in documents.json")
+                        raise ValueError("Invalid document structure in documents.json")
+                        
+                    global_state.data_manager.documents = loaded_docs
+                
+                # Update state
+                global_state.system_status.data_loaded = True
+                doc_count = len(global_state.data_manager.documents)
+                global_state.indexing_status.documents_count = doc_count
+                
+                # Update indexed document IDs
+                global_state.data_manager.indexed_document_ids = set(doc["id"] for doc in global_state.data_manager.documents)
+                
+                logger.info(f"Loaded {doc_count} documents from file")
+                
+                # Make sure indexing_status is consistent with the loaded documents
+                if global_state.indexing_status.documents_count != doc_count:
+                    logger.warning(f"Fixing inconsistent document count: {global_state.indexing_status.documents_count} -> {doc_count}")
                     global_state.indexing_status.documents_count = doc_count
                     
-                    # Update indexed document IDs
-                    global_state.data_manager.indexed_document_ids = set(doc["id"] for doc in global_state.data_manager.documents)
-                    
-                    logger.info(f"Loaded {doc_count} documents from file")
-                    
-                    # Make sure indexing_status is consistent with the loaded documents
-                    if global_state.indexing_status.documents_count != doc_count:
-                        logger.warning(f"Fixing inconsistent document count: {global_state.indexing_status.documents_count} -> {doc_count}")
-                        global_state.indexing_status.documents_count = doc_count
-                        
-                except Exception as e:
-                    logger.error(f"Error loading documents from file: {str(e)}")
-                    logger.error(traceback.format_exc())
+            except Exception as e:
+                logger.error(f"Error loading documents from file: {str(e)}")
+                logger.error(traceback.format_exc())
             
             # Initialize SearchEngine but don't fully load indexes yet
             global_state.search_engine = SearchEngine(global_state.data_manager, initialize_on_start=False)
