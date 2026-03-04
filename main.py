@@ -109,6 +109,7 @@ def _parse_bool_env(var_name: str, default: bool) -> bool:
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_'-]+", re.UNICODE)
 TOKENIZER_FALLBACK_WARNED = False
 STOPWORDS_FALLBACK_WARNED = False
+NLTK_AUTO_DOWNLOAD = _parse_bool_env("NLTK_AUTO_DOWNLOAD", False)
 
 
 def _ensure_nltk_resource(resource_path: str, download_name: str) -> bool:
@@ -116,6 +117,12 @@ def _ensure_nltk_resource(resource_path: str, download_name: str) -> bool:
         nltk.data.find(resource_path)
         return True
     except LookupError:
+        if not NLTK_AUTO_DOWNLOAD:
+            logger.info(
+                "NLTK resource '%s' missing and NLTK_AUTO_DOWNLOAD is disabled. Using fallback.",
+                download_name,
+            )
+            return False
         try:
             nltk.download(download_name, quiet=True)
             nltk.data.find(resource_path)
