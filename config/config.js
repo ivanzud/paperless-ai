@@ -12,6 +12,10 @@ const parseEnvBoolean = (value, defaultValue = 'yes') => {
 const normalizePaperlessBaseUrl = (url) => (url || '').replace(/\/+$/, '').replace(/\/api\/?$/, '');
 const paperlessApiUrl = process.env.PAPERLESS_API_URL || '';
 const paperlessExternalUrl = normalizePaperlessBaseUrl(process.env.PAPERLESS_EXTERNAL_URL || paperlessApiUrl);
+const useExistingData = process.env.USE_EXISTING_DATA || 'no';
+const overwriteExistingCorrespondent = process.env.OVERWRITE_EXISTING_CORRESPONDENT === undefined
+  ? (useExistingData === 'yes' ? 'no' : 'yes')
+  : parseEnvBoolean(process.env.OVERWRITE_EXISTING_CORRESPONDENT, 'no');
 
 // Initialize limit functions with defaults
 const limitFunctions = {
@@ -59,7 +63,7 @@ module.exports = {
   PAPERLESS_AI_VERSION: '3.0.9',
   CONFIGURED: false,
   disableAutomaticProcessing: process.env.DISABLE_AUTOMATIC_PROCESSING || 'no',
-  overwriteExistingCorrespondent: parseEnvBoolean(process.env.OVERWRITE_EXISTING_CORRESPONDENT, 'no'),
+  overwriteExistingCorrespondent,
   predefinedMode: process.env.PROCESS_PREDEFINED_DOCUMENTS,
   tokenLimit: process.env.TOKEN_LIMIT || 128000,
   responseTokens: process.env.RESPONSE_TOKENS || 1000,
@@ -106,7 +110,7 @@ module.exports = {
   customFields: process.env.CUSTOM_FIELDS || '',
   aiProvider: process.env.AI_PROVIDER || 'openai',
   scanInterval: process.env.SCAN_INTERVAL || '*/30 * * * *',
-  useExistingData: process.env.USE_EXISTING_DATA || 'no',
+  useExistingData,
   // Add limit functions to config
   limitFunctions: {
     activateTagging: limitFunctions.activateTagging,
