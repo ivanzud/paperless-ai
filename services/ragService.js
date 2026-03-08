@@ -4,9 +4,15 @@ const config = require('../config/config');
 const AIServiceFactory = require('./aiServiceFactory');
 const paperlessService = require('./paperlessService');
 
-const DEFAULT_MAX_SOURCES = 5;
 const BROAD_MAX_SOURCES = 40;
 const MAX_ALLOWED_SOURCES = 100;
+const DEFAULT_MAX_SOURCES = parseConfiguredInteger(process.env.RAG_MAX_SOURCES, 5, {
+  min: 1,
+  max: MAX_ALLOWED_SOURCES
+});
+const DEFAULT_MAX_DOC_CHARS = parseConfiguredInteger(process.env.RAG_MAX_DOC_CHARS, 0, {
+  min: 0
+});
 const COVERAGE_QUERY_PATTERNS = [
   /\bhow many\b/i,
   /\bnumber of\b/i,
@@ -23,6 +29,23 @@ const CORPUS_COUNT_HINT_PATTERNS = [
   /\bindex(?:ed)?\b/i,
   /\ball documents?\b/i
 ];
+
+function parseConfiguredInteger(value, fallback, { min = null, max = null } = {}) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed)) {
+    return fallback;
+  }
+
+  if (min !== null && parsed < min) {
+    return min;
+  }
+
+  if (max !== null && parsed > max) {
+    return max;
+  }
+
+  return parsed;
+}
 
 class RagService {
   constructor() {
@@ -71,6 +94,18 @@ class RagService {
     const baseValue = this.isCoverageQuestion(question) ? BROAD_MAX_SOURCES : DEFAULT_MAX_SOURCES;
     const resolvedValue = hasRequestedSources ? parsedRequestedSources : baseValue;
     return Math.min(Math.max(resolvedValue, 1), MAX_ALLOWED_SOURCES);
+  }
+
+  truncateDocumentContent(fullContent) {
+    if (typeof fullContent !== 'string' || !fullContent) {
+      return '';
+    }
+
+    if (DEFAULT_MAX_DOC_CHARS <= 0 || fullContent.length <= DEFAULT_MAX_DOC_CHARS) {
+      return fullContent;
+    }
+
+    return `${fullContent.slice(0, DEFAULT_MAX_DOC_CHARS)}...`;
   }
 
   /**
@@ -157,7 +192,8 @@ class RagService {
             if (source.doc_id) {
               try {
                 const fullContent = await paperlessService.getDocumentContent(source.doc_id);
-                return `Full document content for ${source.title || 'Document ' + source.doc_id}:\n${fullContent}`;
+                const truncatedContent = this.truncateDocumentContent(fullContent);
+                return `Full document content for ${source.title || 'Document ' + source.doc_id}:\n${truncatedContent}`;
               } catch (error) {
                 console.error(`Error fetching content for document ${source.doc_id}:`, error.message);
                 return '';

@@ -64,7 +64,6 @@ CROSS_ENCODER_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 COLLECTION_NAME = "documents"
 BM25_WEIGHT = 0.3
 SEMANTIC_WEIGHT = 0.7
-MAX_RESULTS = 20
 MAX_CONTEXT_RESULTS = 100
 COUNT_QUERY_PATTERNS = [
     r"\bhow many\b",
@@ -106,10 +105,56 @@ def _parse_bool_env(var_name: str, default: bool) -> bool:
     )
     return default
 
+
+def _parse_int_env(
+    var_name: str,
+    default: int,
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> int:
+    value = os.getenv(var_name)
+    if value is None:
+        return default
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid integer value '%s' for %s. Falling back to %s.",
+            value,
+            var_name,
+            default,
+        )
+        return default
+
+    if minimum is not None and parsed < minimum:
+        logger.warning(
+            "Value %s for %s is below minimum %s. Using %s instead.",
+            parsed,
+            var_name,
+            minimum,
+            minimum,
+        )
+        parsed = minimum
+
+    if maximum is not None and parsed > maximum:
+        logger.warning(
+            "Value %s for %s exceeds maximum %s. Using %s instead.",
+            parsed,
+            var_name,
+            maximum,
+            maximum,
+        )
+        parsed = maximum
+
+    return parsed
+
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_'-]+", re.UNICODE)
 TOKENIZER_FALLBACK_WARNED = False
 STOPWORDS_FALLBACK_WARNED = False
 NLTK_AUTO_DOWNLOAD = _parse_bool_env("NLTK_AUTO_DOWNLOAD", False)
+MAX_RESULTS = _parse_int_env("RAG_MAX_RESULTS", 20, minimum=1, maximum=MAX_CONTEXT_RESULTS)
+DEFAULT_MAX_SOURCES = _parse_int_env("RAG_MAX_SOURCES", 5, minimum=1, maximum=MAX_CONTEXT_RESULTS)
 
 
 def _ensure_nltk_resource(resource_path: str, download_name: str) -> bool:
@@ -202,7 +247,7 @@ class IndexingRequest(BaseModel):
 
 class AskQuestionRequest(BaseModel):
     question: str
-    max_sources: int = Field(default=5, ge=1, le=MAX_CONTEXT_RESULTS)
+    max_sources: int = Field(default=DEFAULT_MAX_SOURCES, ge=1, le=MAX_CONTEXT_RESULTS)
 
 # Response models
 class SearchResult(BaseModel):
