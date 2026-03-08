@@ -8,6 +8,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
+    strategy:
+      matrix:
+        include:
+          - variant: cpu
+            tag_suffix: ""
+            torch_extra: ""
+          - variant: gpu
+            tag_suffix: "-gpu"
+            torch_extra: "gpu"
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -41,9 +50,9 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/paperless-ai
             ghcr.io/${{ github.repository_owner }}/paperless-ai
           tags: |
-            type=schedule,pattern=nightly,suffix=-${{ matrix.variant == 'gpu' && 'gpu' || '' }}
-            type=semver,pattern={{version}},suffix=-${{ matrix.variant == 'gpu' && 'gpu' || '' }},enable=${{ github.event_name == 'release' }}
-            type=raw,value=latest${{ matrix.variant == 'gpu' && '-gpu' || '' }},enable=${{ github.event_name == 'release' }}
+            type=schedule,pattern=nightly,suffix=${{ matrix.tag_suffix }}
+            type=semver,pattern={{version}},suffix=${{ matrix.tag_suffix }},enable=${{ github.event_name == 'release' }}
+            type=raw,value=latest${{ matrix.tag_suffix }},enable=${{ github.event_name == 'release' }}
             
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -54,4 +63,4 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            TORCH_EXTRA=${{ matrix.variant }}
+            TORCH_EXTRA=${{ matrix.torch_extra }}

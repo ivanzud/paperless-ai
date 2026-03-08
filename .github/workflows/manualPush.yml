@@ -56,7 +56,7 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/paperless-ai
           tags: |
             type=raw,value=${{ inputs.tag }}${{ inputs.variant == 'gpu' && '-gpu' || '' }}
-            type=sha,prefix={{branch}}-,suffix=-${{ inputs.variant == 'gpu' && 'gpu' || '' }}
+            type=sha,prefix={{branch}}-,suffix=${{ inputs.variant == 'gpu' && '-gpu' || '' }}
             
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -67,7 +67,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            TORCH_EXTRA=${{ inputs.variant }}
+            TORCH_EXTRA=${{ inputs.variant == 'gpu' && 'gpu' || '' }}
           
       - name: Summary
         run: |
