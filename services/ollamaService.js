@@ -100,6 +100,37 @@ class OllamaService {
         requestBody.keep_alive = this._getKeepAlive();
     }
 
+    _normalizeAnalysisResponse(parsedResponse) {
+        const safeResponse = parsedResponse && typeof parsedResponse === 'object'
+            ? parsedResponse
+            : {};
+
+        if (safeResponse.notes == null && safeResponse.note != null) {
+            safeResponse.notes = safeResponse.note;
+        }
+
+        const tags = Array.isArray(safeResponse.tags)
+            ? safeResponse.tags
+                .filter((tag) => typeof tag === 'string' && tag.trim())
+                .map((tag) => tag.trim())
+            : [];
+
+        return {
+            tags,
+            correspondent: typeof safeResponse.correspondent === 'string' ? safeResponse.correspondent.trim() || null : null,
+            title: typeof safeResponse.title === 'string' ? safeResponse.title.trim() || null : null,
+            document_date: typeof safeResponse.document_date === 'string' ? safeResponse.document_date.trim() || null : null,
+            document_type: typeof safeResponse.document_type === 'string' ? safeResponse.document_type.trim() || null : null,
+            language: typeof safeResponse.language === 'string' ? safeResponse.language.trim() || null : null,
+            notes: typeof safeResponse.notes === 'string'
+                ? safeResponse.notes.trim() || null
+                : (safeResponse.notes == null ? null : String(safeResponse.notes)),
+            custom_fields: safeResponse.custom_fields && typeof safeResponse.custom_fields === 'object'
+                ? safeResponse.custom_fields
+                : null
+        };
+    }
+
     _isTransientNetworkError(error) {
         const status = Number(error?.response?.status);
         if (status === 408 || status === 429 || (status >= 500 && status <= 599)) {
@@ -724,16 +755,7 @@ class OllamaService {
      * @returns {Object} Parsed response
      */
     _processOllamaResponse(responseData) {
-        const emptyAnalysis = {
-            tags: [],
-            correspondent: null,
-            title: null,
-            document_date: null,
-            document_type: null,
-            language: null,
-            notes: null,
-            custom_fields: null
-        };
+        const emptyAnalysis = this._normalizeAnalysisResponse({});
 
         if (!responseData || typeof responseData !== 'object') {
             console.warn('[WARNING] Ollama response payload is missing or invalid, returning empty analysis.');
@@ -744,16 +766,7 @@ class OllamaService {
         if (responseData.response && typeof responseData.response === 'object') {
             // We got a structured response directly
             console.log('Using structured output response');
-                return {
-                    tags: Array.isArray(responseData.response.tags) ? responseData.response.tags : [],
-                    correspondent: responseData.response.correspondent || null,
-                    title: responseData.response.title || null,
-                    document_date: responseData.response.document_date || null,
-                    document_type: responseData.response.document_type || null,
-                    language: responseData.response.language || null,
-                    notes: responseData.response.notes || null,
-                    custom_fields: responseData.response.custom_fields || null
-                };
+            return this._normalizeAnalysisResponse(responseData.response);
         } else if (typeof responseData.response === 'string' && responseData.response.trim()) {
             // Fall back to parsing from text response
             console.log('Falling back to text response parsing');
@@ -783,56 +796,101 @@ class OllamaService {
      * @returns {Object} Parsed object
      */
     _parseResponse(response) {
+        const emptyAnalysis = this._normalizeAnalysisResponse({});
+
         try {
-            // Find JSON in response using regex
-            const jsonMatch = response.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-                return { tags: [], correspondent: null };
-            }
-
-            let jsonStr = jsonMatch[0];
-            console.log('Extracted JSON String:', jsonStr);
-
             try {
-                // Attempt to parse the JSON
-                const result = JSON.parse(jsonStr);
-
-                // Validate and return the result
-                return {
-                    tags: Array.isArray(result.tags) ? result.tags : [],
-                    correspondent: result.correspondent || null,
-                    title: result.title || null,
-                    document_date: result.document_date || null,
-                    document_type: result.document_type || null,
-                    language: result.language || null,
-                    notes: result.notes || null,
-                    custom_fields: result.custom_fields || null
-                };
-
+                const parsedResponse = this._parseResponseJson(response);
+                return this._normalizeAnalysisResponse(parsedResponse);
             } catch (jsonError) {
                 console.warn('Error parsing JSON from response:', jsonError.message);
-                console.warn('Attempting to sanitize the JSON...');
-
-                // Sanitize the JSON
-                jsonStr = this._sanitizeJsonString(jsonStr);
-
-                try {
-                    const sanitizedResult = JSON.parse(jsonStr);
-                    return {
-                        tags: Array.isArray(sanitizedResult.tags) ? sanitizedResult.tags : [],
-                        correspondent: sanitizedResult.correspondent || null,
-                        title: sanitizedResult.title || null,
-                        document_date: sanitizedResult.document_date || null,
-                        language: sanitizedResult.language || null
-                    };
-                } catch (finalError) {
-                    console.error('Final JSON parsing failed after sanitization. This happens when the JSON structure is too complex or invalid. That indicates an issue with the generated JSON string by Ollama. Switch to OpenAI for better results or fine tune your prompt.');
-                    return { tags: [], correspondent: null };
-                }
+                console.error('Final JSON parsing failed after sanitization. This happens when the JSON structure is too complex or invalid. That indicates an issue with the generated JSON string by Ollama. Switch to OpenAI for better results or fine tune your prompt.');
+                return emptyAnalysis;
             }
         } catch (error) {
             console.error('Error parsing Ollama response:', error.message);
-            return { tags: [], correspondent: null };
+            return emptyAnalysis;
+        }
+    }
+
+    _extractJsonCandidate(raw) {
+        const content = String(raw || '').trim();
+        const fenceCleaned = content.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+        const firstBrace = fenceCleaned.indexOf('{');
+
+        if (firstBrace === -1) {
+            return '';
+        }
+
+        const lastBrace = fenceCleaned.lastIndexOf('}');
+        if (lastBrace !== -1 && lastBrace > firstBrace) {
+            return fenceCleaned.slice(firstBrace, lastBrace + 1);
+        }
+
+        return fenceCleaned.slice(firstBrace);
+    }
+
+    _balanceJsonDelimiters(jsonStr) {
+        const stack = [];
+        let inString = false;
+        let escaped = false;
+        let balanced = String(jsonStr || '');
+
+        for (const char of balanced) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+
+            if (char === '\\') {
+                escaped = true;
+                continue;
+            }
+
+            if (char === '"') {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString) {
+                continue;
+            }
+
+            if (char === '{' || char === '[') {
+                stack.push(char);
+                continue;
+            }
+
+            if (char === '}' || char === ']') {
+                const expected = char === '}' ? '{' : '[';
+                if (stack[stack.length - 1] === expected) {
+                    stack.pop();
+                }
+            }
+        }
+
+        while (stack.length > 0) {
+            const opener = stack.pop();
+            balanced += opener === '{' ? '}' : ']';
+        }
+
+        return balanced;
+    }
+
+    _parseResponseJson(raw) {
+        const candidate = this._extractJsonCandidate(raw);
+        if (!candidate) {
+            throw new Error('No JSON object found in Ollama response.');
+        }
+
+        console.log('Extracted JSON String:', candidate);
+
+        try {
+            return JSON.parse(candidate);
+        } catch (_) {
+            console.warn('Attempting to sanitize the JSON...');
+            const sanitized = this._balanceJsonDelimiters(this._sanitizeJsonString(candidate));
+            return JSON.parse(sanitized);
         }
     }
 
@@ -842,7 +900,7 @@ class OllamaService {
      * @returns {string} Sanitized JSON string
      */
     _sanitizeJsonString(jsonStr) {
-        return jsonStr
+        return String(jsonStr || '')
             .replace(/,\s*}/g, '}') // Remove trailing commas before closing braces
             .replace(/,\s*]/g, ']') // Remove trailing commas before closing brackets
             .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":'); // Ensure property names are quoted
