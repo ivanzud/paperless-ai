@@ -2,7 +2,8 @@ const {
     calculateTokens, 
     calculateTotalPromptTokens, 
     truncateToTokenLimit, 
-    writePromptToFile 
+    writePromptToFile,
+    buildTemperatureOption
 } = require('./serviceUtils');
 const axios = require('axios');
 const OpenAI = require('openai');
@@ -87,7 +88,7 @@ class ManualService {
                 content: content
             }
             ],
-            ...(model !== 'o3-mini' && { temperature: 0.3 }),
+            ...buildTemperatureOption(model, 0.3),
         });
     
         let jsonContent = response.choices[0].message.content;
@@ -136,7 +137,7 @@ class ManualService {
                 content: content
             }
             ],
-            temperature: 0.3,
+            ...buildTemperatureOption(process.env.AZURE_DEPLOYMENT_NAME, 0.3),
         });
     
         let jsonContent = response.choices[0].message.content;
@@ -185,7 +186,7 @@ class ManualService {
                     content: content
                 }
                 ],
-                ...(model !== 'o3-mini' && { temperature: 0.3 }),
+                ...buildTemperatureOption(model, 0.3),
             });
         
             let jsonContent = response.choices[0].message.content;

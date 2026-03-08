@@ -2,7 +2,8 @@ const {
   calculateTokens,
   calculateTotalPromptTokens,
   truncateToTokenLimit,
-  writePromptToFile
+  writePromptToFile,
+  buildTemperatureOption
 } = require('./serviceUtils');
 const OpenAI = require('openai');
 const config = require('../config/config');
@@ -389,7 +390,7 @@ class CustomOpenAIService {
           content: chunkContent
         }
       ],
-      temperature: 0.3,
+      ...buildTemperatureOption(model, 0.3),
     }, 'analyzeDocument chunk');
 
     if (!response?.choices?.[0]?.message?.content) {
@@ -738,7 +739,7 @@ class CustomOpenAIService {
             content: truncatedContent
         }
       ],
-      temperature: 0.3,
+      ...buildTemperatureOption(config.custom.model, 0.3),
       }, 'analyzePlayground');
 
       // Handle response
@@ -813,7 +814,7 @@ class CustomOpenAIService {
             content: prompt
           }
         ],
-        temperature: 0.7,
+        ...buildTemperatureOption(model, 0.7),
         max_tokens: maxTokens
       }, 'generateText');
 
@@ -846,7 +847,7 @@ class CustomOpenAIService {
             content: 'Ping'
           }
         ],
-        temperature: 0.7,
+        ...buildTemperatureOption(model, 0.7),
         max_tokens: 1000
       }, 'checkStatus');
 

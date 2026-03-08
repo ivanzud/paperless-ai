@@ -93,6 +93,24 @@ function estimateTokensForNonOpenAI(text) {
     return Math.ceil(text.length / 4);
 }
 
+function modelSupportsCustomTemperature(model) {
+    const normalizedModel = String(model || '').trim().toLowerCase();
+    if (!normalizedModel) {
+        return true;
+    }
+
+    return !(
+        normalizedModel.startsWith('gpt-5')
+        || normalizedModel.startsWith('o1')
+        || normalizedModel.startsWith('o3')
+        || normalizedModel.startsWith('o4')
+    );
+}
+
+function buildTemperatureOption(model, temperature) {
+    return modelSupportsCustomTemperature(model) ? { temperature } : {};
+}
+
 // Calculate tokens for a given text
 async function calculateTokens(text, model = process.env.OPENAI_MODEL || "gpt-4o-mini") {
     const normalizedText = normalizeTextInput(text);
@@ -240,5 +258,7 @@ module.exports = {
     calculateTokens,
     calculateTotalPromptTokens,
     truncateToTokenLimit,
-    writePromptToFile
+    writePromptToFile,
+    modelSupportsCustomTemperature,
+    buildTemperatureOption
 };

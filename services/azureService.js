@@ -2,7 +2,8 @@ const {
   calculateTokens,
   calculateTotalPromptTokens,
   truncateToTokenLimit,
-  writePromptToFile
+  writePromptToFile,
+  buildTemperatureOption
 } = require('./serviceUtils');
 const OpenAI = require('openai');
 const AzureOpenAI = require('openai').AzureOpenAI;
@@ -196,7 +197,7 @@ class AzureOpenAIService {
             content: truncatedContent
           }
         ],
-        temperature: 0.3,
+        ...buildTemperatureOption(model, 0.3),
       });
 
       if (!response?.choices?.[0]?.message?.content) {
@@ -321,7 +322,7 @@ class AzureOpenAIService {
             content: truncatedContent
           }
         ],
-        temperature: 0.3,
+        ...buildTemperatureOption(process.env.AZURE_DEPLOYMENT_NAME, 0.3),
       });
 
       // Handle response
@@ -395,7 +396,7 @@ class AzureOpenAIService {
             content: prompt
           }
         ],
-        temperature: 0.7,
+        ...buildTemperatureOption(model, 0.7),
         max_tokens: 1000
       });
 
@@ -428,7 +429,7 @@ class AzureOpenAIService {
             content: "Test"
           }
         ],
-        temperature: 0.7,
+        ...buildTemperatureOption(model, 0.7),
         max_tokens: 10
       });
 
@@ -461,7 +462,7 @@ class AzureOpenAIService {
             content: 'Ping'
           }
         ],
-        temperature: 0.7,
+        ...buildTemperatureOption(model, 0.7),
         max_tokens: 1000
       });
 

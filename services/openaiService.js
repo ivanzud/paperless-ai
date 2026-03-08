@@ -2,7 +2,8 @@ const {
   calculateTokens,
   calculateTotalPromptTokens,
   truncateToTokenLimit,
-  writePromptToFile
+  writePromptToFile,
+  buildTemperatureOption
 } = require('./serviceUtils');
 const OpenAI = require('openai');
 const config = require('../config/config');
@@ -303,7 +304,7 @@ class OpenAIService {
             content: truncatedContent
           }
         ],
-        ...(model !== 'o3-mini' && { temperature: 0.3 }),
+        ...buildTemperatureOption(model, 0.3),
       }, 'analyzeDocument');
 
       if (!response?.choices?.[0]?.message?.content) {
@@ -434,7 +435,7 @@ class OpenAIService {
             content: truncatedContent
           }
         ],
-        ...(model !== 'o3-mini' && { temperature: 0.3 }),
+        ...buildTemperatureOption(model, 0.3),
       }, 'analyzePlayground');
 
       // Handle response
@@ -514,7 +515,7 @@ class OpenAIService {
             content: prompt
           }
         ],
-        temperature: 0.7
+        ...buildTemperatureOption(model, 0.7)
       }, 'generateText');
 
       if (!response?.choices?.[0]?.message?.content) {
@@ -536,20 +537,21 @@ class OpenAIService {
       if (!this.client) {
         throw new Error('OpenAI client not initialized - missing API key');
       }
+      const model = process.env.OPENAI_MODEL;
       const response = await this._createChatCompletionWithRetry({
-        model: process.env.OPENAI_MODEL,
+        model: model,
         messages: [
           {
             role: "user",
             content: "Test"
           }
         ],
-        temperature: 0.7
+        ...buildTemperatureOption(model, 0.7)
       }, 'checkStatus');
       if (!response?.choices?.[0]?.message?.content) {
         throw new Error('Invalid API response structure');
       }
-      return { status: 'ok', model: process.env.OPENAI_MODEL };
+      return { status: 'ok', model: model };
     } catch (error) {
       console.error('Error checking OpenAI status:', error);
       return { status: 'error', error: error.message };
