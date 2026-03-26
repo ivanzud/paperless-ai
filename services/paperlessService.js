@@ -4,6 +4,7 @@ const config = require('../config/config');
 const fs = require('fs');
 const path = require('path');
 const { parse, isValid, parseISO, format } = require('date-fns');
+const metadataNormalizationService = require('./metadataNormalizationService');
 
 const AI_NOTE_PREFIX = '[Paperless-AI]';
 
@@ -12,6 +13,7 @@ class PaperlessService {
     this.client = null;
     this.tagCache = new Map();
     this.tagNormalizedCache = new Map();
+    this.tagIdCache = new Map();
     this.documentTypeCache = new Map();
     this.documentTypeNormalizedCache = new Map();
     this.customFieldCache = new Map();
@@ -217,6 +219,11 @@ class PaperlessService {
 
   // Aktualisiert den Tag-Cache, wenn er älter als CACHE_LIFETIME ist
   async ensureTagCache() {
+    this.initialize();
+    if (!this.client) {
+      throw new Error('Paperless client is not initialized');
+    }
+
     const now = Date.now();
     if (this.tagCache.size === 0 || (now - this.lastTagRefresh) > this.CACHE_LIFETIME) {
       await this.refreshTagCache();
@@ -229,6 +236,7 @@ class PaperlessService {
         console.log('[DEBUG] Refreshing tag cache...');
         this.tagCache.clear();
         this.tagNormalizedCache.clear();
+        this.tagIdCache.clear();
         let nextUrl = '/tags/';
         while (nextUrl) {
           const response = await this.client.get(nextUrl);
@@ -241,6 +249,7 @@ class PaperlessService {
 
           response.data.results.forEach(tag => {
             this.tagCache.set(tag.name.toLowerCase(), tag);
+            this.tagIdCache.set(tag.id, tag);
             const normalizedName = this.normalizeForLookup(tag.name);
             if (normalizedName) {
               this.tagNormalizedCache.set(normalizedName, tag);
@@ -611,6 +620,47 @@ class PaperlessService {
     }
   }
 
+  async normalizeTagIds(tagIds = []) {
+    await this.ensureTagCache();
+
+    const normalizedTagIds = [];
+    const seen = new Set();
+
+    for (const rawTagId of tagIds) {
+      const numericTagId = Number(rawTagId);
+      const currentTag = this.tagIdCache.get(numericTagId);
+
+      if (!currentTag) {
+        if (!seen.has(rawTagId)) {
+          seen.add(rawTagId);
+          normalizedTagIds.push(rawTagId);
+        }
+        continue;
+      }
+
+      const normalizedTagName = metadataNormalizationService.normalizeTagName(currentTag.name);
+      if (!normalizedTagName) {
+        continue;
+      }
+
+      let resolvedTag = currentTag;
+      if (this.normalizeForLookup(normalizedTagName) !== this.normalizeForLookup(currentTag.name)) {
+        resolvedTag = await this.findExistingTag(normalizedTagName);
+        if (!resolvedTag) {
+          resolvedTag = await this.createTagSafely(normalizedTagName);
+        }
+      }
+
+      const resolvedTagId = resolvedTag?.id ?? numericTagId;
+      if (!seen.has(resolvedTagId)) {
+        seen.add(resolvedTagId);
+        normalizedTagIds.push(resolvedTagId);
+      }
+    }
+
+    return normalizedTagIds;
+  }
+
   async getTags() {
     this.initialize();
     if (!this.client) {
@@ -660,6 +710,53 @@ class PaperlessService {
     }
 
     return tags;
+  }
+
+  async getTagDocumentCount(tagName) {
+    this.initialize();
+    await this.ensureTagCache();
+
+    const tag = await this.findExistingTag(tagName);
+    if (!tag) {
+      return 0;
+    }
+
+    if (typeof tag.document_count === 'number') {
+      return tag.document_count;
+    }
+
+    try {
+      const response = await this.client.get(`/tags/${tag.id}/`);
+      const freshTag = response.data;
+      this.tagCache.set(freshTag.name.toLowerCase(), freshTag);
+      const normalizedLookup = this.normalizeForLookup(freshTag.name);
+      if (normalizedLookup) {
+        this.tagNormalizedCache.set(normalizedLookup, freshTag);
+      }
+      this.tagIdCache.set(freshTag.id, freshTag);
+      return Number(freshTag.document_count || 0);
+    } catch (error) {
+      console.error(`[ERROR] fetching document count for tag "${tagName}":`, error.message);
+      return 0;
+    }
+  }
+
+  async getBlockingTagCounts(tagNames = []) {
+    const uniqueNames = [...new Set(
+      (Array.isArray(tagNames) ? tagNames : [])
+        .map((tagName) => typeof tagName === 'string' ? tagName.trim() : '')
+        .filter(Boolean)
+    )];
+
+    const results = [];
+    for (const tagName of uniqueNames) {
+      results.push({
+        name: tagName,
+        count: await this.getTagDocumentCount(tagName)
+      });
+    }
+
+    return results;
   }
 
   async getTagCount() {
@@ -1706,19 +1803,21 @@ async getOrCreateDocumentType(name, options = {}) {
         console.log(`[DEBUG] Adding new tags:`, updates.tags);
         console.log(`[DEBUG] Current correspondent:`, currentDoc.correspondent);
         console.log(`[DEBUG] New correspondent:`, updates.correspondent);
-                
-        const combinedTags = [...new Set([...currentDoc.tags, ...updates.tags])];
+
+        const normalizedCurrentTags = await this.normalizeTagIds(currentDoc.tags || []);
+        const normalizedIncomingTags = await this.normalizeTagIds(updates.tags || []);
+        const combinedTags = [...new Set([...normalizedCurrentTags, ...normalizedIncomingTags])];
         updates.tags = combinedTags;
         
         console.log(`[DEBUG] Combined tags:`, combinedTags);
       }
 
       if (currentDoc.correspondent && updates.correspondent) {
-        if (config.overwriteExistingCorrespondent === 'yes') {
-          console.log(`[DEBUG] Overwriting existing correspondent ${currentDoc.correspondent} with AI suggestion: ${updates.correspondent}`);
+        if (process.env.USE_EXISTING_DATA === 'yes') {
+          console.log('[DEBUG] Document already has a correspondent, keeping existing one:', currentDoc.correspondent);
+          delete updates.correspondent;
         } else {
-          console.log('[DEBUG] Document already has a correspondent, keeping existing one and preserving it in payload:', currentDoc.correspondent);
-          updates.correspondent = currentDoc.correspondent;
+          console.log('[DEBUG] Overwriting correspondent:', currentDoc.correspondent, '->', updates.correspondent);
         }
       }
 

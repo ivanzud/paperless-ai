@@ -86,6 +86,10 @@ npm install
 npm run test
 ```
 
+## 🏠 Local Policy Automation
+
+For local Paperless OCR -> AI workflow policy and metadata normalization automation, see [docs/LOCAL_POLICY.md](docs/LOCAL_POLICY.md).
+
 ---
 
 ## 🧭 Roadmap Highlights

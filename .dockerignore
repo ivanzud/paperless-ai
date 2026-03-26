@@ -47,3 +47,8 @@ schemas.js
 setup.png
 test-restriction-service.js
 test-updated-service.js
+.agents/
+.agents.root-owned.*/
+.agents.root-owned*
+.beads/
+.venv/

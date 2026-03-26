@@ -153,6 +153,33 @@ const getPaperlessExternalBaseUrl = () => {
   return normalizePaperlessBaseUrl(process.env.PAPERLESS_API_URL || '');
 };
 
+function getBlockingTagNames() {
+  return (process.env.BLOCK_SCAN_WHEN_TAGS_PRESENT || '')
+    .split(',')
+    .map((tagName) => tagName.trim())
+    .filter(Boolean);
+}
+
+async function getActiveScanBlockers() {
+  const tagNames = getBlockingTagNames();
+  if (tagNames.length === 0) {
+    return [];
+  }
+
+  const counts = await paperlessService.getBlockingTagCounts(tagNames);
+  return counts.filter((entry) => entry.count > 0);
+}
+
+function formatScanBlockerMessage(blockers) {
+  if (!Array.isArray(blockers) || blockers.length === 0) {
+    return '';
+  }
+
+  return blockers
+    .map((blocker) => `${blocker.name}=${blocker.count}`)
+    .join(', ');
+}
+
 // Combined middleware to check authentication and setup
 router.use(async (req, res, next) => {
   const token = req.cookies.jwt || req.headers.authorization?.split(' ')[1];
@@ -1538,6 +1565,13 @@ try {
       console.error('Failed to get own user ID. Abort scanning.');
       return;
     }
+
+    const blockers = await getActiveScanBlockers();
+    if (blockers.length > 0) {
+      const message = `Task skipped: blocker tags still have queued documents (${formatScanBlockerMessage(blockers)})`;
+      console.log(`[INFO] ${message}`);
+      return res.status(200).send(message);
+    }
     
       try {
         let [existingTags, documents, ownUserId, existingCorrespondentList, existingDocumentTypes] = await Promise.all([
@@ -1563,13 +1597,15 @@ try {
             if (!result) continue;
     
             const { analysis, originalData } = result;
-            const updateData = await buildUpdateData(analysis, doc);
+            const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
             await saveDocumentChanges(doc.id, updateData, analysis, originalData);
+            await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
           } catch (error) {
             console.error(`[ERROR] processing document ${doc.id}:`, error);
             if (error?.stack) {
               console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
             }
+            await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
             if (isRateLimitError(error)) {
               console.warn('[WARNING] AI provider rate limit encountered (HTTP 429). Stopping current scan run to avoid rapid retries.');
               break;
@@ -1608,8 +1644,11 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
     paperlessService.getDocument(doc.id)
   ]);
 
-  if (!content || !content.length >= 10) {
+  content = metadataNormalizationService.sanitizeDocumentContent(content);
+
+  if (!content || content.length < 10) {
     console.log(`[DEBUG] Document ${doc.id} has no content, skipping analysis`);
+    await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
     return null;
   }
 
@@ -1660,8 +1699,13 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
   return { analysis, originalData };
 }
 
-async function buildUpdateData(analysis, doc) {
+async function buildUpdateData(analysis, doc, existingTags = [], existingDocumentTypes = []) {
   const updateData = {};
+  const normalizedDocument = metadataNormalizationService.normalizeAnalysisDocument(
+    analysis?.document || {},
+    { currentDoc: doc, maxTags: 4 }
+  );
+  let resolvedAnalysisTagIds = [];
 
   // Create options object with restriction settings
   const options = {
@@ -1673,7 +1717,8 @@ async function buildUpdateData(analysis, doc) {
 
   // Only process tags if tagging is activated
   if (config.limitFunctions?.activateTagging !== 'no') {
-    const { tagIds, errors } = await paperlessService.processTags(analysis.document.tags, options);
+    const { tagIds, errors } = await paperlessService.processTags(normalizedDocument.tags, options);
+    resolvedAnalysisTagIds = tagIds;
     if (errors.length > 0) {
       console.warn('[ERROR] Some tags could not be processed:', errors);
     }
@@ -1693,16 +1738,19 @@ async function buildUpdateData(analysis, doc) {
 
   // Only process title if title generation is activated
   if (config.limitFunctions?.activateTitle !== 'no') {
-    updateData.title = analysis.document.title || doc.title;
+    updateData.title = normalizedDocument.title || doc.title;
   }
 
   // Add created date regardless of settings as it's a core field
-  updateData.created = analysis.document.document_date || doc.created;
+  updateData.created = normalizedDocument.document_date || doc.created;
 
   // Only process document type if document type classification is activated
-  if (config.limitFunctions?.activateDocumentType !== 'no' && analysis.document.document_type) {
+  if (config.limitFunctions?.activateDocumentType !== 'no' && normalizedDocument.document_type) {
     try {
-      const documentType = await paperlessService.getOrCreateDocumentType(analysis.document.document_type);
+      const documentType = await paperlessService.getOrCreateDocumentType(normalizedDocument.document_type, {
+        restrictToExistingDocumentTypes: config.restrictToExistingDocumentTypes === 'yes',
+        existingDocumentTypes
+      });
       if (documentType) {
         updateData.document_type = documentType.id;
       }
@@ -1712,8 +1760,8 @@ async function buildUpdateData(analysis, doc) {
   }
 
   // Only process custom fields if custom fields detection is activated
-  if (config.limitFunctions?.activateCustomFields !== 'no' && analysis.document.custom_fields) {
-    const customFields = analysis.document.custom_fields;
+  if (config.limitFunctions?.activateCustomFields !== 'no' && normalizedDocument.custom_fields) {
+    const customFields = normalizedDocument.custom_fields;
     const processedFields = [];
 
     // Get existing custom fields
@@ -1776,9 +1824,9 @@ async function buildUpdateData(analysis, doc) {
   }
 
   // Only process correspondent if correspondent detection is activated
-  if (config.limitFunctions?.activateCorrespondents !== 'no' && analysis.document.correspondent) {
+  if (config.limitFunctions?.activateCorrespondents !== 'no' && normalizedDocument.correspondent) {
     try {
-      const correspondent = await paperlessService.getOrCreateCorrespondent(analysis.document.correspondent, options);
+      const correspondent = await paperlessService.getOrCreateCorrespondent(normalizedDocument.correspondent, options);
       if (correspondent) {
         updateData.correspondent = correspondent.id;
       }
@@ -1788,8 +1836,8 @@ async function buildUpdateData(analysis, doc) {
   }
 
   // Always include language if provided as it's a core field
-  if (analysis.document.language) {
-    updateData.language = analysis.document.language;
+  if (normalizedDocument.language) {
+    updateData.language = normalizedDocument.language;
   }
 
   if (analysis.document.notes && typeof analysis.document.notes === 'string') {
@@ -1797,6 +1845,34 @@ async function buildUpdateData(analysis, doc) {
     if (trimmedNotes.length > 0) {
       updateData.notes = trimmedNotes;
     }
+  }
+
+  let resolvedTagCount = resolvedAnalysisTagIds.length;
+  if (process.env.ADD_AI_PROCESSED_TAG === 'yes' && process.env.AI_PROCESSED_TAG_NAME) {
+    const aiProcessedTag = await paperlessService.findExistingTag(process.env.AI_PROCESSED_TAG_NAME);
+    if (aiProcessedTag?.id) {
+      resolvedTagCount = resolvedAnalysisTagIds.filter((tagId) => tagId !== aiProcessedTag.id).length;
+    }
+  }
+
+  const hasMeaningfulUpdate = metadataNormalizationService.hasMeaningfulAnalysis(
+    normalizedDocument,
+    doc,
+    {
+      resolvedTagCount,
+      features: {
+        title: config.limitFunctions?.activateTitle !== 'no',
+        tags: config.limitFunctions?.activateTagging !== 'no',
+        correspondent: config.limitFunctions?.activateCorrespondents !== 'no',
+        documentType: config.limitFunctions?.activateDocumentType !== 'no',
+        customFields: config.limitFunctions?.activateCustomFields !== 'no',
+        date: true
+      }
+    }
+  );
+
+  if (!hasMeaningfulUpdate) {
+    throw new Error('[ERROR] AI returned no actionable metadata');
   }
 
   return updateData;
@@ -2510,20 +2586,24 @@ async function processQueue(customPrompt) {
       paperlessService.getOwnUserID()
     ]);
 
+    const existingTagNames = existingTags.map((tag) => tag.name);
+    const existingCorrespondentNames = existingCorrespondentList.map((correspondent) => correspondent.name);
     const existingDocumentTypesList = existingDocumentTypes.map(docType => docType.name);
 
     while (documentQueue.length > 0) {
       const doc = documentQueue.shift();
-      
+
       try {
-        const result = await processDocument(doc, existingTags, existingCorrespondentList, existingDocumentTypesList, ownUserId, customPrompt);
+        const result = await processDocument(doc, existingTagNames, existingCorrespondentNames, existingDocumentTypesList, ownUserId, customPrompt);
         if (!result) continue;
 
         const { analysis, originalData } = result;
-        const updateData = await buildUpdateData(analysis, doc);
+        const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
+        await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
       } catch (error) {
         console.error(`[ERROR] Failed to process document ${doc.id}:`, error);
+        await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
         if (isRateLimitError(error)) {
           documentQueue.unshift(doc);
           queueRateLimitResumeAt = Date.now() + QUEUE_RATE_LIMIT_COOLDOWN_MS;

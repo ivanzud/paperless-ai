@@ -29,6 +29,7 @@ RAGZ_README.md
 # Local development files
 .local/
 *.local.*
+config/local/*.local.json
 /chromadb
 /chromadb/*
 rag_config.conf
@@ -42,3 +43,10 @@ surya_env/
 ocr_server.py
 surya_models.py
 CLAUDE.md
+
+# AgentOps session artifacts (auto-added by ao init)
+.agents/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

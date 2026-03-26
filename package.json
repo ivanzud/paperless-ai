@@ -4,7 +4,9 @@
   "description": "AI based Tag, correspondent and meta data generation",
   "main": "server.js",
   "scripts": {
-    "test": "nodemon server.js"
+    "test": "nodemon server.js",
+    "check:local-policy": "node scripts/paperless/applyLocalPolicy.js --container paperless-ai --dry-run",
+    "apply:local-policy": "node scripts/paperless/applyLocalPolicy.js --container paperless-ai"
   },
   "keywords": [
     "paperless-ngx",

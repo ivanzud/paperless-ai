@@ -245,6 +245,7 @@ class ManualService {
             model: config.ollama.model,
             prompt: prompt,
             stream: false,
+            think: config.ollama.thinking === 'yes',
             options: {
             temperature: 0.7,
             top_p: 0.9,
