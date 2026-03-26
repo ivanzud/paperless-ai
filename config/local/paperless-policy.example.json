@@ -1,0 +1,138 @@
+{
+  "metadata": {
+    "tagAliases": {
+      "123 Main St": "Main",
+      "456 Beach Ave": "Beach",
+      "JANE DOE": "Jane Doe",
+      "Brighthouse": "Brighthouse Financial"
+    },
+    "titleReplacements": {
+      "123 Main St": "Main",
+      "456 Beach Ave": "Beach",
+      "JANE DOE": "Jane Doe"
+    },
+    "propertyTags": [
+      "Main",
+      "Beach"
+    ],
+    "dropAddressTags": true,
+    "dropExactTags": [
+      "Health"
+    ],
+    "dropPatterns": [
+      "^(January|February|March|April|May|June|July|August|September|October|November|December)\\\\s+\\\\d{4}$"
+    ],
+    "keepNumericTags": [
+      "6124"
+    ]
+  },
+  "paperlessAiEnv": {
+    "DISABLE_AUTOMATIC_PROCESSING": "no",
+    "PROCESS_PREDEFINED_DOCUMENTS": "yes",
+    "TAGS": "paperless-ai-auto",
+    "ADD_AI_PROCESSED_TAG": "yes",
+    "AI_PROCESSED_TAG_NAME": "ai-processed",
+    "SCAN_INTERVAL": "*/15 * * * *",
+    "ACTIVATE_TITLE": "yes",
+    "ACTIVATE_CORRESPONDENTS": "yes",
+    "ACTIVATE_DOCUMENT_TYPE": "yes",
+    "USE_EXISTING_DATA": "yes",
+    "BLOCK_SCAN_WHEN_TAGS_PRESENT": "paperless-gpt-ocr-auto"
+  },
+  "pipeline": {
+    "tags": {
+      "aiProcessed": "ai-processed",
+      "paperlessAiAuto": "paperless-ai-auto",
+      "paperlessGptAuto": "paperless-gpt-auto",
+      "paperlessGptOcrAuto": "paperless-gpt-ocr-auto",
+      "paperlessGptOcrComplete": "paperless-gpt-ocr-complete",
+      "paperlessGptOcrFailed": "paperless-gpt-ocr-failed"
+    },
+    "workflows": [
+      {
+        "name": "Paperless-gpt-ocr-auto",
+        "order": 1,
+        "enabled": true,
+        "triggers": [
+          {
+            "type": 2,
+            "sources": [1, 2, 3, 4],
+            "allTags": [],
+            "notTags": [
+              "paperless-gpt-ocr-auto",
+              "paperless-gpt-ocr-complete",
+              "paperless-gpt-ocr-failed"
+            ]
+          }
+        ],
+        "actions": [
+          {
+            "type": 1,
+            "assignTags": ["paperless-gpt-ocr-auto"],
+            "removeTags": []
+          }
+        ]
+      },
+      {
+        "name": "Paperless-gpt to Paperless-ai handoff",
+        "order": 2,
+        "enabled": true,
+        "triggers": [
+          {
+            "type": 3,
+            "sources": [1, 2, 3, 4],
+            "allTags": ["paperless-gpt-ocr-complete"],
+            "notTags": ["ai-processed", "paperless-ai-auto"]
+          }
+        ],
+        "actions": [
+          {
+            "type": 1,
+            "assignTags": ["paperless-ai-auto"],
+            "removeTags": []
+          }
+        ]
+      },
+      {
+        "name": "Paperless-ai queue cleanup",
+        "order": 3,
+        "enabled": true,
+        "triggers": [
+          {
+            "type": 3,
+            "sources": [1, 2, 3, 4],
+            "allTags": ["ai-processed", "paperless-gpt-ocr-complete"],
+            "notTags": []
+          }
+        ],
+        "actions": [
+          {
+            "type": 2,
+            "assignTags": [],
+            "removeTags": ["ai-processed", "paperless-ai-auto", "paperless-gpt-ocr-complete"]
+          }
+        ]
+      },
+      {
+        "name": "Paperless-ai standalone cleanup",
+        "order": 4,
+        "enabled": true,
+        "triggers": [
+          {
+            "type": 3,
+            "sources": [1, 2, 3, 4],
+            "allTags": ["ai-processed", "paperless-ai-auto"],
+            "notTags": ["paperless-gpt-ocr-complete"]
+          }
+        ],
+        "actions": [
+          {
+            "type": 2,
+            "assignTags": [],
+            "removeTags": ["ai-processed", "paperless-ai-auto"]
+          }
+        ]
+      }
+    ]
+  }
+}

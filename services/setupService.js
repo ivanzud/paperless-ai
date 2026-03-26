@@ -137,9 +137,18 @@ class SetupService {
       const response = await axios.post(`${url}/api/generate`, {
         model: model || 'llama3.2',
         prompt: 'Test',
-        stream: false
+        stream: false,
+        think: false
       });
-      return response.data && response.data.response;
+      // Some models can return an empty "response" while still succeeding (e.g. thinking output).
+      // Treat a successful generate payload as valid as long as it includes known Ollama fields.
+      if (!response?.data || typeof response.data !== 'object') {
+        return false;
+      }
+      const hasResponseField = Object.prototype.hasOwnProperty.call(response.data, 'response');
+      const hasThinkingField = Object.prototype.hasOwnProperty.call(response.data, 'thinking');
+      const isCompleted = response.data.done === true;
+      return hasResponseField || hasThinkingField || isCompleted;
     } catch (error) {
       console.error('Ollama validation error:', error.message);
       return false;

@@ -37,6 +37,33 @@ const txtLogger = new Logger({
 const app = express();
 let runningTask = false;
 
+function getBlockingTagNames() {
+  return (process.env.BLOCK_SCAN_WHEN_TAGS_PRESENT || '')
+    .split(',')
+    .map((tagName) => tagName.trim())
+    .filter(Boolean);
+}
+
+async function getActiveScanBlockers() {
+  const tagNames = getBlockingTagNames();
+  if (tagNames.length === 0) {
+    return [];
+  }
+
+  const counts = await paperlessService.getBlockingTagCounts(tagNames);
+  return counts.filter((entry) => entry.count > 0);
+}
+
+function formatScanBlockerMessage(blockers) {
+  if (!Array.isArray(blockers) || blockers.length === 0) {
+    return '';
+  }
+
+  return blockers
+    .map((blocker) => `${blocker.name}=${blocker.count}`)
+    .join(', ');
+}
+
 
 const corsOptions = {
   origin: true,
@@ -206,9 +233,11 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
       paperlessService.getDocument(doc.id)
     ]);
 
+    content = metadataNormalizationService.sanitizeDocumentContent(content);
+
     if (!content || content.length < 10) {
       console.log(`[DEBUG] Document ${doc.id} has no content, skipping analysis`);
-      await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
+      await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
       return null;
     }
 
@@ -244,11 +273,7 @@ async function buildUpdateData(analysis, doc, existingTags = [], existingDocumen
     analysis?.document || {},
     { currentDoc: doc, maxTags: 4 }
   );
-
-  console.log('TEST: ', config.addAIProcessedTag)
-  console.log('TEST 2: ', config.addAIProcessedTags)
-  
-  // Initialize an empty array for our final list of tags
+  let resolvedAnalysisTagIds = [];
   let allTagsToProcess = [];
 
   // Only process tags if tagging is activated
@@ -279,6 +304,7 @@ async function buildUpdateData(analysis, doc, existingTags = [], existingDocumen
       restrictToExistingTags: config.restrictToExistingTags === 'yes',
       existingTags
     });
+    resolvedAnalysisTagIds = tagIds;
     if (errors.length > 0) {
       console.warn('[ERROR] Some tags could not be processed:', errors);
     }
@@ -386,7 +412,9 @@ async function buildUpdateData(analysis, doc, existingTags = [], existingDocumen
   // Only process correspondent if correspondent detection is activated
   if (config.limitFunctions?.activateCorrespondents !== 'no' && normalizedDocument.correspondent) {
     try {
-      const correspondent = await paperlessService.getOrCreateCorrespondent(normalizedDocument.correspondent);
+      const correspondent = await paperlessService.getOrCreateCorrespondent(normalizedDocument.correspondent, {
+        restrictToExistingCorrespondents: config.restrictToExistingCorrespondents === 'yes'
+      });
       if (correspondent) {
         updateData.correspondent = correspondent.id;
       }
@@ -405,6 +433,34 @@ async function buildUpdateData(analysis, doc, existingTags = [], existingDocumen
     if (trimmedNotes.length > 0) {
       updateData.notes = trimmedNotes;
     }
+  }
+
+  let resolvedTagCount = resolvedAnalysisTagIds.length;
+  if (process.env.ADD_AI_PROCESSED_TAG === 'yes' && process.env.AI_PROCESSED_TAG_NAME) {
+    const aiProcessedTag = await paperlessService.findExistingTag(process.env.AI_PROCESSED_TAG_NAME);
+    if (aiProcessedTag?.id) {
+      resolvedTagCount = resolvedAnalysisTagIds.filter((tagId) => tagId !== aiProcessedTag.id).length;
+    }
+  }
+
+  const hasMeaningfulUpdate = metadataNormalizationService.hasMeaningfulAnalysis(
+    normalizedDocument,
+    doc,
+    {
+      resolvedTagCount,
+      features: {
+        title: config.limitFunctions?.activateTitle !== 'no',
+        tags: config.limitFunctions?.activateTagging !== 'no',
+        correspondent: config.limitFunctions?.activateCorrespondents !== 'no',
+        documentType: config.limitFunctions?.activateDocumentType !== 'no',
+        customFields: config.limitFunctions?.activateCustomFields !== 'no',
+        date: true
+      }
+    }
+  );
+
+  if (!hasMeaningfulUpdate) {
+    throw new Error('[ERROR] AI returned no actionable metadata');
   }
 
   return updateData;
@@ -436,6 +492,12 @@ async function scanInitial() {
       return;
     }
 
+    const blockers = await getActiveScanBlockers();
+    if (blockers.length > 0) {
+      console.log(`[INFO] Skipping initial scan because blocker tags still have queued documents: ${formatScanBlockerMessage(blockers)}`);
+      return;
+    }
+
     let [existingTags, documents, ownUserId, existingCorrespondentList, existingDocumentTypes] = await Promise.all([
       paperlessService.getTags(),
       paperlessService.getAllDocuments(),
@@ -458,11 +520,13 @@ async function scanInitial() {
         const { analysis, originalData } = result;
         const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
+        await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, error);
         if (error?.stack) {
           console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
         }
+        await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
       }
     }
   } catch (error) {
@@ -478,6 +542,12 @@ async function scanDocuments() {
 
   runningTask = true;
   try {
+    const blockers = await getActiveScanBlockers();
+    if (blockers.length > 0) {
+      console.log(`[INFO] Skipping document scan because blocker tags still have queued documents: ${formatScanBlockerMessage(blockers)}`);
+      return;
+    }
+
     let [existingTags, documents, ownUserId, existingCorrespondentList, existingDocumentTypes] = await Promise.all([
       paperlessService.getTags(),
       paperlessService.getAllDocuments(),
@@ -503,11 +573,13 @@ async function scanDocuments() {
         const { analysis, originalData } = result;
         const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
+        await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, error);
         if (error?.stack) {
           console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
         }
+        await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
       }
     }
   } catch (error) {

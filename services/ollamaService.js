@@ -41,6 +41,7 @@ class OllamaService {
             ? configuredRetryMaxDelayMs
             : 10000;
         this.unloadInProgress = null;
+        this.thinkingEnabled = config.ollama.thinking === 'yes';
         this.client = axios.create({
             timeout: this.timeoutMs
         });
@@ -735,6 +736,7 @@ class OllamaService {
             prompt: prompt,
             system: systemPrompt,
             stream: false,
+            think: this.thinkingEnabled,
             format: schema,
             options: requestOptions
         };
@@ -950,6 +952,7 @@ class OllamaService {
                 prompt: prompt,
                 system: systemPrompt,
                 stream: false,
+                think: this.thinkingEnabled,
                 options: requestOptions
             };
             this._applyKeepAlive(requestBody);
