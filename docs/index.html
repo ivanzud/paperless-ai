@@ -593,24 +593,18 @@
                 <div class="tab-content active" id="docker-content">
                     <div class="command-line">
                         <span class="prompt">$</span>
-                        <span class="command">Quick start with Docker</span>
+                        <span class="command">Quick start with Docker Compose</span>
                     </div>
                     <div class="code-block">
                         <button class="copy-button">
                             <i class="far fa-copy"></i>
                             Copy
                         </button>
-                        <pre><code>docker pull clusterzx/paperless-ai:latest
-
-docker run -d \
-    --name paperless-ai \
-    --network bridge \
-    -v paperless-ai_data:/app/data \
-    -p 3000:3000 \
-    --restart unless-stopped \
-    clusterzx/paperless-ai
-                          </code></pre>
+                        <pre><code>docker compose -f docker-compose.ghcr.yml up -d</code></pre>
                     </div>
+                    <p style="margin-top: 1rem; opacity: 0.9;">
+                        This path uses the published GHCR image, keeps data in a named volume, and leaves the source-based local compose workflow untouched.
+                    </p>
                 </div>
 
                 <div class="tab-content" id="manual-content">
