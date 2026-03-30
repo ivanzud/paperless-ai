@@ -1,0 +1,20 @@
+services:
+  paperless-ai:
+    image: ghcr.io/ivanzud/paperless-ai:latest
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges=true
+    ports:
+      - "${PAPERLESS_AI_PORT:-3000}:${PAPERLESS_AI_PORT:-3000}"
+    environment:
+      PAPERLESS_AI_PORT: ${PAPERLESS_AI_PORT:-3000}
+    volumes:
+      - paperless-ai_data:/app/data
+    stop_grace_period: 30s
+
+volumes:
+  paperless-ai_data:

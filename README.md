@@ -70,9 +70,13 @@ Powered by **Retrieval-Augmented Generation (RAG)**, you can now search semantic
 
 ## 🐳 Docker Support
 
-- Health monitoring and auto-restart
-- Persistent volumes and graceful shutdown
-- Works out of the box with minimal setup
+- Local development uses the source-based `docker-compose.yml`
+- Deployment uses the image-based `docker-compose.ghcr.yml`
+- The GHCR path pulls `ghcr.io/ivanzud/paperless-ai:latest`, persists `/app/data`, and keeps the container restart-safe
+
+```bash
+docker compose -f docker-compose.ghcr.yml up -d
+```
 
 ---
 
