@@ -1,4 +1,9 @@
+name: Build and Push Docker Images
+
 on:
+  push:
+    branches:
+      - main
   release:
     types: [published]  # Only triggers when a release is published
   schedule:
@@ -7,6 +12,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       packages: write
     strategy:
       matrix:
@@ -28,8 +34,29 @@ jobs:
         
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        
+
+      - name: Set image destinations
+        id: image_destinations
+        run: |
+          if [[ "${GITHUB_REPOSITORY}" == "clusterzx/paperless-ai" ]]; then
+            echo "publish_dockerhub=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "images<<EOF"
+              echo "${{ secrets.DOCKER_USERNAME }}/paperless-ai"
+              echo "ghcr.io/${GITHUB_REPOSITORY_OWNER}/paperless-ai"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_dockerhub=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "images<<EOF"
+              echo "ghcr.io/${GITHUB_REPOSITORY_OWNER}/paperless-ai"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Log in to Docker Hub
+        if: steps.image_destinations.outputs.publish_dockerhub == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -46,13 +73,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ secrets.DOCKER_USERNAME }}/paperless-ai
-            ghcr.io/${{ github.repository_owner }}/paperless-ai
+          images: ${{ steps.image_destinations.outputs.images }}
           tags: |
             type=schedule,pattern=nightly,suffix=${{ matrix.tag_suffix }}
             type=semver,pattern={{version}},suffix=${{ matrix.tag_suffix }},enable=${{ github.event_name == 'release' }}
-            type=raw,value=latest${{ matrix.tag_suffix }},enable=${{ github.event_name == 'release' }}
+            type=raw,value=latest${{ matrix.tag_suffix }},enable=${{ github.event_name == 'release' || github.ref == 'refs/heads/main' }}
+            type=sha,format=short,suffix=${{ matrix.tag_suffix }},enable=${{ github.event_name != 'schedule' }}
             
       - name: Build and push
         uses: docker/build-push-action@v6
