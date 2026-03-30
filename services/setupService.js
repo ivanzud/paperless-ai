@@ -126,6 +126,9 @@ class SetupService {
       return completion.choices && completion.choices.length > 0;
     } catch (error) {
       console.error('Custom AI validation error:', error);
+      if (error?.status === 429 || error?.response?.status === 429) {
+        return true;
+      }
       return false;
     }
   }

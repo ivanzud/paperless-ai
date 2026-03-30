@@ -483,6 +483,26 @@ async function saveDocumentChanges(docId, updateData, analysis, originalData) {
   ]);
 }
 
+async function reconcileStaleProcessedDocuments(documents) {
+  const remoteDocumentIds = new Set(
+    (Array.isArray(documents) ? documents : [])
+      .map((doc) => Number(doc?.id))
+      .filter((id) => Number.isFinite(id))
+  );
+
+  const processedDocuments = await documentModel.getProcessedDocuments();
+  const staleIds = processedDocuments
+    .map((row) => Number(row?.document_id))
+    .filter((id) => Number.isFinite(id) && !remoteDocumentIds.has(id));
+
+  if (staleIds.length === 0) {
+    return;
+  }
+
+  console.warn(`[WARN] Removing ${staleIds.length} stale local processed document entries`);
+  await documentModel.deleteDocumentsIdList(staleIds);
+}
+
 // Main scanning functions
 async function scanInitial() {
   try {
@@ -508,6 +528,8 @@ async function scanInitial() {
     //get existing correspondent list
     existingCorrespondentList = existingCorrespondentList.map(correspondent => correspondent.name);
     let existingDocumentTypesList = existingDocumentTypes.map(docType => docType.name);
+
+    await reconcileStaleProcessedDocuments(documents);
     
     // Extract tag names from tag objects
     const existingTagNames = existingTags.map(tag => tag.name);
@@ -561,6 +583,8 @@ async function scanDocuments() {
     
     //get existing document types list
     let existingDocumentTypesList = existingDocumentTypes.map(docType => docType.name);
+
+    await reconcileStaleProcessedDocuments(documents);
     
     // Extract tag names from tag objects
     const existingTagNames = existingTags.map(tag => tag.name);
@@ -720,6 +744,7 @@ async function startScanning() {
     const isConfigured = await setupService.isConfigured();
     if (!isConfigured) {
       console.log(`Setup not completed. Visit http://your-machine-ip:${process.env.PAPERLESS_AI_PORT || 3000}/setup to complete setup.`);
+      return;
     }
 
     const userId = await paperlessService.getOwnUserID();

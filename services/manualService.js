@@ -219,24 +219,27 @@ class ManualService {
         };
         
         const calculateNumCtx = (promptTokenCount, expectedResponseTokens) => {
-            const totalTokenUsage = promptTokenCount + expectedResponseTokens;
+            const safeExpectedResponseTokens = Number.isFinite(expectedResponseTokens) && expectedResponseTokens > 0
+                ? expectedResponseTokens
+                : Number(config.responseTokens) || 1000;
+            const totalTokenUsage = promptTokenCount + safeExpectedResponseTokens;
             const maxCtxLimit = Number(config.tokenLimit);
             
             const numCtx = Math.min(totalTokenUsage, maxCtxLimit);
             
             console.log('Prompt Token Count:', promptTokenCount);
-            console.log('Expected Response Tokens:', expectedResponseTokens);
+            console.log('Expected Response Tokens:', safeExpectedResponseTokens);
             console.log('Dynamic calculated num_ctx:', numCtx);
             
             return numCtx;
         };
         
         const calculatePromptTokenCount = (prompt) => {
-            return Math.ceil(prompt.length / 4);
+            return Math.ceil(prompt.length / 2);
         };
         
         const { freeMemoryMB } = await getAvailableMemory();
-        const expectedResponseTokens = 1024;
+        const expectedResponseTokens = Number(config.responseTokens);
         const promptTokenCount = calculatePromptTokenCount(prompt);
         
         const numCtx = calculateNumCtx(promptTokenCount, expectedResponseTokens);

@@ -300,7 +300,7 @@ class OllamaService {
 
             // Calculate context window size
             const promptTokenCount = this._calculatePromptTokenCount(prompt);
-            const numCtx = this._calculateNumCtx(promptTokenCount, 1024);
+            const numCtx = this._calculateNumCtx(promptTokenCount, Number(config.responseTokens));
 
             console.log(`[DEBUG] Use existing data: ${config.useExistingData}, Restrictions applied based on useExistingData setting`);
             console.log(`[DEBUG] External API data: ${validatedExternalApiData ? 'included' : 'none'}`);
@@ -356,7 +356,7 @@ class OllamaService {
             const contentTokenCount = await calculateTokens(contentText);
             const systemTokenCount = await calculateTokens(systemPrompt);
             const totalRequestTokens = promptTokenCount + contentTokenCount + systemTokenCount;
-            const numCtx = this._calculateNumCtx(totalRequestTokens, 1024);
+            const numCtx = this._calculateNumCtx(totalRequestTokens, Number(config.responseTokens));
 
             // Call Ollama API
             const response = await this._callOllamaAPI(
@@ -653,7 +653,7 @@ class OllamaService {
      * @returns {number} Estimated token count
      */
     _calculatePromptTokenCount(prompt) {
-        return Math.ceil(prompt.length / 4);
+        return Math.ceil(prompt.length / 2);
     }
 
     /**
@@ -663,13 +663,16 @@ class OllamaService {
      * @returns {number} Context window size
      */
     _calculateNumCtx(promptTokenCount, expectedResponseTokens) {
-        const totalTokenUsage = promptTokenCount + expectedResponseTokens;
+        const safeExpectedResponseTokens = Number.isFinite(expectedResponseTokens) && expectedResponseTokens > 0
+            ? expectedResponseTokens
+            : Number(config.responseTokens) || 1000;
+        const totalTokenUsage = promptTokenCount + safeExpectedResponseTokens;
         const maxCtxLimit = Number(config.tokenLimit);
 
         const numCtx = Math.min(totalTokenUsage, maxCtxLimit);
 
         console.log('Prompt Token Count:', promptTokenCount);
-        console.log('Expected Response Tokens:', expectedResponseTokens);
+        console.log('Expected Response Tokens:', safeExpectedResponseTokens);
         console.log('Dynamic calculated num_ctx:', numCtx);
 
         return numCtx;
@@ -932,7 +935,7 @@ class OllamaService {
         try {
             // Calculate context window size based on prompt length
             const promptTokenCount = this._calculatePromptTokenCount(prompt);
-            const numCtx = this._calculateNumCtx(promptTokenCount, 512);
+            const numCtx = this._calculateNumCtx(promptTokenCount, Number(config.responseTokens));
 
             // Simple system prompt for text generation
             const systemPrompt = `You are a helpful assistant. Generate a clear, concise, and informative response to the user's question or request.`;
