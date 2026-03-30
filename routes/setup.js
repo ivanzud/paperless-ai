@@ -1557,13 +1557,13 @@ try {
     const isConfigured = await setupService.isConfigured();
     if (!isConfigured) {
       console.log(`Setup not completed. Visit http://your-machine-ip:${process.env.PAPERLESS_AI_PORT || 3000}/setup to complete setup.`);
-      return;
+      return res.status(503).send('Task skipped: setup not completed');
     }
 
     const userId = await paperlessService.getOwnUserID();
     if (!userId) {
       console.error('Failed to get own user ID. Abort scanning.');
-      return;
+      return res.status(400).send('Task aborted: failed to get own user ID');
     }
 
     const blockers = await getActiveScanBlockers();
@@ -1581,6 +1581,7 @@ try {
           paperlessService.listCorrespondentsNames(),
           paperlessService.listDocumentTypesNames()
         ]);
+        await reconcileStaleProcessedDocuments(documents);
     
         //get existing correspondent list
         existingCorrespondentList = existingCorrespondentList.map(correspondent => correspondent.name);
@@ -1624,6 +1625,26 @@ try {
     console.error('[ERROR] in startScanning:', error);
   }
 });
+
+async function reconcileStaleProcessedDocuments(documents) {
+  const remoteDocumentIds = new Set(
+    (Array.isArray(documents) ? documents : [])
+      .map((doc) => Number(doc?.id))
+      .filter((id) => Number.isFinite(id))
+  );
+
+  const processedDocuments = await documentModel.getProcessedDocuments();
+  const staleIds = processedDocuments
+    .map((row) => Number(row?.document_id))
+    .filter((id) => Number.isFinite(id) && !remoteDocumentIds.has(id));
+
+  if (staleIds.length === 0) {
+    return;
+  }
+
+  console.warn(`[WARN] Removing ${staleIds.length} stale local processed document entries`);
+  await documentModel.deleteDocumentsIdList(staleIds);
+}
 
 async function processDocument(doc, existingTags, existingCorrespondentList, existingDocumentTypesList, ownUserId, customPrompt = null) {
   const isProcessed = await documentModel.isDocumentProcessed(doc.id, doc.checksum);
