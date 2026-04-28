@@ -111,6 +111,61 @@ function buildTemperatureOption(model, temperature) {
     return modelSupportsCustomTemperature(model) ? { temperature } : {};
 }
 
+function isLongTextCustomField(dataType) {
+    const normalizedType = String(dataType || '').toLowerCase().replace(/[\s_-]/g, '');
+    return normalizedType === 'longtext' || normalizedType === 'textarea';
+}
+
+function normalizeMonetaryCustomFieldValue(value) {
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    const stripped = value
+        .trim()
+        .replace(/[^\d,.\-+]/g, '');
+
+    if (!stripped) {
+        return stripped;
+    }
+
+    const commaIndex = stripped.lastIndexOf(',');
+    const dotIndex = stripped.lastIndexOf('.');
+
+    if (commaIndex !== -1 && commaIndex > dotIndex) {
+        const decimalPart = stripped.slice(commaIndex + 1);
+        if (/^\d{1,4}$/.test(decimalPart)) {
+            const wholePart = stripped.slice(0, commaIndex).replace(/[.,]/g, '');
+            return `${wholePart}.${decimalPart}`;
+        }
+    }
+
+    if (dotIndex !== -1 && commaIndex !== -1 && dotIndex > commaIndex) {
+        return stripped.replace(/,/g, '');
+    }
+
+    return stripped;
+}
+
+function normalizeCustomFieldValueForPaperless(value, fieldDetails = {}) {
+    let normalizedValue = typeof value === 'string' ? value.trim() : value;
+    const dataType = fieldDetails.data_type || fieldDetails.dataType || '';
+
+    if (String(dataType).toLowerCase() === 'monetary') {
+        normalizedValue = normalizeMonetaryCustomFieldValue(normalizedValue);
+    }
+
+    if (
+        typeof normalizedValue === 'string'
+        && !isLongTextCustomField(dataType)
+        && normalizedValue.length > 128
+    ) {
+        return normalizedValue.substring(0, 128);
+    }
+
+    return normalizedValue;
+}
+
 // Calculate tokens for a given text
 async function calculateTokens(text, model = process.env.OPENAI_MODEL || "gpt-4o-mini") {
     const normalizedText = normalizeTextInput(text);
@@ -260,5 +315,8 @@ module.exports = {
     truncateToTokenLimit,
     writePromptToFile,
     modelSupportsCustomTemperature,
-    buildTemperatureOption
+    buildTemperatureOption,
+    isLongTextCustomField,
+    normalizeMonetaryCustomFieldValue,
+    normalizeCustomFieldValueForPaperless
 };

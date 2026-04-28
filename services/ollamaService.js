@@ -458,48 +458,20 @@ class OllamaService {
             ? `IMPORTANT: The following correspondents already exist in the system: ${correspondentList.join(', ')}\nWhen identifying the correspondent, prefer an existing one if the document's sender is a close match. Use EXACTLY that existing name (e.g. if the document shows "MediaMarkt Saturn Media GmbH" and "MediaMarkt" is in the list, return "MediaMarkt"). Only return a completely new name if none of the existing correspondents are a reasonable match.`
             : '';
 
-        // Get system prompt based on configuration
-        if (config.useExistingData === 'yes' && config.restrictToExistingTags === 'no' && config.restrictToExistingCorrespondents === 'no') {
-            // Format existing tags
-            const existingTagsList = existingTags.join(', ');
+        const baseMustHavePrompt = config.mustHavePrompt
+            .replace('%CUSTOMFIELDS%', customFieldsStr)
+            .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+        const existingDataPrompt = RestrictionPromptService.buildExistingDataPrompt(
+            existingTags,
+            correspondentList,
+            existingDocumentTypes,
+            config
+        );
 
-            // Format existing correspondents - handle both array of objects and array of strings
-            const existingCorrespondentList = correspondentList
-                .filter(Boolean)  // Remove any null/undefined entries
-                .map(correspondent => {
-                    if (typeof correspondent === 'string') return correspondent;
-                    return correspondent?.name || '';
-                })
-                .filter(name => name.length > 0)  // Remove empty strings
-                .join(', ');
-
-            // Format existing document types - handle both array of objects and array of strings
-            const existingDocumentTypesList = existingDocumentTypes
-                .filter(Boolean)  // Remove any null/undefined entries
-                .map(docType => {
-                    if (typeof docType === 'string') return docType;
-                    return docType?.name || '';
-                })
-                .filter(name => name.length > 0)  // Remove empty strings
-                .join(', ');
-
-            const baseMustHavePrompt = config.mustHavePrompt
-                .replace('%CUSTOMFIELDS%', customFieldsStr)
-                .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
-
-            systemPrompt = `
-            Pre-existing tags: ${existingTagsList}\n\n
-            Pre-existing correspondents: ${existingCorrespondentList}\n\n
-            Pre-existing document types: ${existingDocumentTypesList}\n\n
-            ` + process.env.SYSTEM_PROMPT + '\n\n' + baseMustHavePrompt;
-            promptTags = '';
-        } else {
-            const baseMustHavePrompt = config.mustHavePrompt
-                .replace('%CUSTOMFIELDS%', customFieldsStr)
-                .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
-            systemPrompt = process.env.SYSTEM_PROMPT + '\n\n' + baseMustHavePrompt;
-            promptTags = '';
-        }
+        systemPrompt = [existingDataPrompt, process.env.SYSTEM_PROMPT, baseMustHavePrompt]
+            .filter(Boolean)
+            .join('\n\n');
+        promptTags = '';
 
         // Get validated external API data if available
         let validatedExternalApiData = null;

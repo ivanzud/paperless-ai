@@ -176,9 +176,6 @@ class OpenAIService {
         await fs.writeFile(cachePath, thumbnailData);
       }
 
-      // Format existing tags
-      let existingTagsList = existingTags.join(', ');
-
       // Get external API data if available and validate it
       let externalApiData = options.externalApiData || null;
       let validatedExternalApiData = null;
@@ -230,17 +227,16 @@ class OpenAIService {
         .replace('%CUSTOMFIELDS%', customFieldsStr)
         .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
 
-      if (config.useExistingData === 'yes' && config.restrictToExistingTags === 'no' && config.restrictToExistingCorrespondents === 'no') {
-        systemPrompt = `
-        Pre-existing tags: ${existingTagsList}\n\n
-        Pre-existing correspondents: ${existingCorrespondentList}\n\n
-        Pre-existing document types: ${existingDocumentTypesList.join(', ')}\n\n
-        ` + process.env.SYSTEM_PROMPT + '\n\n' + mustHavePrompt;
-        promptTags = '';
-      } else {
-        systemPrompt = process.env.SYSTEM_PROMPT + '\n\n' + mustHavePrompt;
-        promptTags = '';
-      }
+      const existingDataPrompt = RestrictionPromptService.buildExistingDataPrompt(
+        existingTags,
+        existingCorrespondentList,
+        existingDocumentTypesList,
+        config
+      );
+      systemPrompt = [existingDataPrompt, process.env.SYSTEM_PROMPT, mustHavePrompt]
+        .filter(Boolean)
+        .join('\n\n');
+      promptTags = '';
 
       // Process placeholder replacements in system prompt
       systemPrompt = RestrictionPromptService.processRestrictionsInPrompt(

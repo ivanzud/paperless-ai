@@ -22,6 +22,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const customService = require('../services/customService.js');
 const metadataNormalizationService = require('../services/metadataNormalizationService');
 const config = require('../config/config.js');
+const { normalizeCustomFieldValueForPaperless } = require('../services/serviceUtils');
 require('dotenv').config({ path: '../data/.env' });
 
 /**
@@ -1817,13 +1818,23 @@ async function buildUpdateData(analysis, doc, existingTags = [], existingDocumen
         continue;
       }
 
-      if (typeof normalizedFieldValue === 'string' && normalizedFieldValue.length > 128) {
-        normalizedFieldValue = normalizedFieldValue.substring(0, 128);
-        console.warn(`[WARN] Truncated custom field "${normalizedFieldName}" to 128 characters for document ${doc.id}`);
-      }
-
       const fieldDetails = await paperlessService.findExistingCustomField(normalizedFieldName);
       if (fieldDetails?.id) {
+        const originalValue = normalizedFieldValue;
+        normalizedFieldValue = normalizeCustomFieldValueForPaperless(normalizedFieldValue, fieldDetails);
+        if (
+          typeof originalValue === 'string'
+          && typeof normalizedFieldValue === 'string'
+          && originalValue.length !== normalizedFieldValue.length
+        ) {
+          console.warn(`[WARN] Normalized custom field "${normalizedFieldName}" for document ${doc.id}`);
+        }
+
+        if (typeof normalizedFieldValue === 'string' && !normalizedFieldValue) {
+          console.log(`[DEBUG] Skipping empty custom field after normalization`);
+          continue;
+        }
+
         processedFields.push({
           field: fieldDetails.id,
           value: normalizedFieldValue

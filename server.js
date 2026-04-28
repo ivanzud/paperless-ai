@@ -9,6 +9,7 @@ const metadataNormalizationService = require('./services/metadataNormalizationSe
 const documentModel = require('./models/document');
 const setupService = require('./services/setupService');
 const setupRoutes = require('./routes/setup');
+const { normalizeCustomFieldValueForPaperless } = require('./services/serviceUtils');
 
 // Add environment variables for RAG service if not already set
 process.env.RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://localhost:8000';
@@ -382,13 +383,23 @@ async function buildUpdateData(analysis, doc, existingTags = [], existingDocumen
         continue;
       }
 
-      if (typeof normalizedFieldValue === 'string' && normalizedFieldValue.length > 128) {
-        normalizedFieldValue = normalizedFieldValue.substring(0, 128);
-        console.warn(`[WARN] Truncated custom field "${normalizedFieldName}" to 128 characters for document ${doc.id}`);
-      }
-
       const fieldDetails = await paperlessService.findExistingCustomField(normalizedFieldName);
       if (fieldDetails?.id) {
+        const originalValue = normalizedFieldValue;
+        normalizedFieldValue = normalizeCustomFieldValueForPaperless(normalizedFieldValue, fieldDetails);
+        if (
+          typeof originalValue === 'string'
+          && typeof normalizedFieldValue === 'string'
+          && originalValue.length !== normalizedFieldValue.length
+        ) {
+          console.warn(`[WARN] Normalized custom field "${normalizedFieldName}" for document ${doc.id}`);
+        }
+
+        if (typeof normalizedFieldValue === 'string' && !normalizedFieldValue) {
+          console.log(`[DEBUG] Skipping empty custom field after normalization`);
+          continue;
+        }
+
         processedFields.push({
           field: fieldDetails.id,
           value: normalizedFieldValue
