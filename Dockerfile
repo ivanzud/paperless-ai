@@ -19,18 +19,16 @@ RUN if [ -n "$TORCH_EXTRA" ]; then \
 
 FROM node:22-trixie-slim AS node-builder
 
-ENV PNPM_HOME=/usr/local/bin
-
 WORKDIR /app
 
 # Install PM2 process manager globally
-RUN corepack enable && pnpm install pm2 -g
+RUN npm install -g pm2
 
 # Copy package files for dependency installation
 COPY package*.json ./
 
 # Install node dependencies with clean install
-RUN pnpm install --prod && pnpm store prune
+RUN npm ci --omit=dev && npm cache clean --force
 
 FROM node:22-trixie-slim
 

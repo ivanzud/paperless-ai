@@ -35,10 +35,17 @@ class ChartManager {
     }
 
     initializeDocumentChart() {
-        const { documentCount, processedCount } = window.dashboardData;
-        const unprocessedCount = documentCount - processedCount;
+        const chartElement = document.getElementById('documentChart');
+        if (!chartElement || typeof Chart === 'undefined') {
+            return;
+        }
 
-        const ctx = document.getElementById('documentChart').getContext('2d');
+        const dashboardData = window.dashboardData || {};
+        const documentCount = Number(dashboardData.documentCount || 0);
+        const processedCount = Number(dashboardData.processedCount || 0);
+        const unprocessedCount = Math.max(documentCount - processedCount, 0);
+
+        const ctx = chartElement.getContext('2d');
         new Chart(ctx, {
             type: 'doughnut',
             data: {

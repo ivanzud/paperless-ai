@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { parse, isValid, parseISO, format } = require('date-fns');
 const metadataNormalizationService = require('./metadataNormalizationService');
+const { normalizeCustomFieldValueForPaperless } = require('./serviceUtils');
 
 const AI_NOTE_PREFIX = '[Paperless-AI]';
 
@@ -372,6 +373,32 @@ class PaperlessService {
       }
     } catch (error) {
       console.warn(`[ERROR] searching for custom field "${fieldName}":`, error.message);
+    }
+
+    return null;
+  }
+
+  async findExistingCustomFieldById(fieldId) {
+    const numericId = Number(fieldId);
+    if (!Number.isFinite(numericId)) {
+      return null;
+    }
+
+    for (const field of this.customFieldCache.values()) {
+      if (Number(field.id) === numericId) {
+        return field;
+      }
+    }
+
+    try {
+      await this.refreshCustomFieldCache();
+      for (const field of this.customFieldCache.values()) {
+        if (Number(field.id) === numericId) {
+          return field;
+        }
+      }
+    } catch (error) {
+      console.warn(`[WARN] Could not refresh custom field cache for field ${fieldId}: ${error.message}`);
     }
 
     return null;
@@ -1878,16 +1905,12 @@ async getOrCreateDocumentType(name, options = {}) {
             continue;
           }
 
-          let normalizedValue = customField.value;
+          const fieldDetails = await this.findExistingCustomFieldById(customField.field);
+          let normalizedValue = normalizeCustomFieldValueForPaperless(customField.value, fieldDetails || {});
           if (typeof normalizedValue === 'string') {
-            normalizedValue = normalizedValue.trim();
             if (!normalizedValue) {
               console.warn(`[WARN] Skipping empty custom field value at index ${index} for document ${documentId}`);
               continue;
-            }
-            if (normalizedValue.length > 128) {
-              normalizedValue = normalizedValue.substring(0, 128);
-              console.warn(`[WARN] Truncated custom field ${customField.field} to 128 characters for document ${documentId}`);
             }
           }
 

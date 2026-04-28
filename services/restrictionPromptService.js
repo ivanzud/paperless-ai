@@ -16,6 +16,39 @@ class RestrictionPromptService {
     return this._replacePlaceholders(prompt, existingTags, existingCorrespondentList);
   }
 
+  static buildExistingDataPrompt(existingTags, existingCorrespondentList, existingDocumentTypes, config = {}) {
+    if (config.useExistingData !== 'yes') {
+      return '';
+    }
+
+    const sections = [];
+    const tagsList = this._formatTagsList(existingTags);
+    if (tagsList) {
+      const label = config.restrictToExistingTags === 'yes'
+        ? 'Allowed existing tags (copy exact names only)'
+        : 'Pre-existing tags';
+      sections.push(`${label}: ${tagsList}`);
+    }
+
+    const correspondentsList = this._formatCorrespondentsList(existingCorrespondentList);
+    if (correspondentsList) {
+      const label = config.restrictToExistingCorrespondents === 'yes'
+        ? 'Allowed existing correspondents (copy exact names only)'
+        : 'Pre-existing correspondents';
+      sections.push(`${label}: ${correspondentsList}`);
+    }
+
+    const documentTypesList = this._formatDocumentTypesList(existingDocumentTypes);
+    if (documentTypesList) {
+      const label = config.restrictToExistingDocumentTypes === 'yes'
+        ? 'Allowed existing document types (copy exact names only)'
+        : 'Pre-existing document types';
+      sections.push(`${label}: ${documentTypesList}`);
+    }
+
+    return sections.join('\n');
+  }
+
   /**
    * Replace placeholders in the prompt with actual data
    * @param {string} prompt - The original prompt
@@ -52,8 +85,12 @@ class RestrictionPromptService {
     }
 
     return existingTags
-      .filter(tag => tag && tag.name)
-      .map(tag => tag.name)
+      .filter(Boolean)
+      .map(tag => {
+        if (typeof tag === 'string') return tag.trim();
+        return tag?.name || '';
+      })
+      .filter(name => name.length > 0)
       .join(', ');
   }
 
@@ -83,6 +120,21 @@ class RestrictionPromptService {
     }
 
     return '';
+  }
+
+  static _formatDocumentTypesList(existingDocumentTypes) {
+    if (!Array.isArray(existingDocumentTypes) || existingDocumentTypes.length === 0) {
+      return '';
+    }
+
+    return existingDocumentTypes
+      .filter(Boolean)
+      .map(documentType => {
+        if (typeof documentType === 'string') return documentType.trim();
+        return documentType?.name || '';
+      })
+      .filter(name => name.length > 0)
+      .join(', ');
   }
 }
 
