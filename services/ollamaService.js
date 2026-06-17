@@ -650,6 +650,15 @@ class OllamaService {
         return numCtx;
     }
 
+    _getResponseTokenLimit(defaultTokens = 1000) {
+        const configuredTokens = Number(config.responseTokens);
+        if (Number.isFinite(configuredTokens) && configuredTokens > 0) {
+            return Math.floor(configuredTokens);
+        }
+
+        return defaultTokens;
+    }
+
     /**
      * Get available system memory
      * @returns {Object} Object with totalMemoryMB and freeMemoryMB
@@ -699,7 +708,7 @@ class OllamaService {
             top_p: 0.9,
             repeat_penalty: 1.1,
             top_k: 7,
-            num_predict: 256
+            num_predict: this._getResponseTokenLimit()
         };
         const parsedNumCtx = Number(numCtx);
         if (Number.isFinite(parsedNumCtx) && parsedNumCtx > 0) {
@@ -915,7 +924,7 @@ class OllamaService {
             const requestOptions = {
                 temperature: 0.7,
                 top_p: 0.9,
-                num_predict: 1024
+                num_predict: this._getResponseTokenLimit(1024)
             };
             const parsedNumCtx = Number(numCtx);
             if (Number.isFinite(parsedNumCtx) && parsedNumCtx > 0) {

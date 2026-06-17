@@ -86,6 +86,7 @@ module.exports = {
   ollama: {
     apiUrl: process.env.OLLAMA_API_URL || 'http://localhost:11434',
     model: process.env.OLLAMA_MODEL || 'llama3.2',
+    thinking: process.env.OLLAMA_THINKING || 'no',
     keepAlive: process.env.OLLAMA_KEEP_ALIVE || '5m',
     timeoutMs: process.env.OLLAMA_TIMEOUT_MS || '1800000',
     maxRetries: process.env.OLLAMA_MAX_RETRIES || '2',
