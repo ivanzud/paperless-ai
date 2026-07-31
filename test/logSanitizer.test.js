@@ -2,9 +2,14 @@
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
+const fs = require('node:fs');
 const http = require('node:http');
+const os = require('node:os');
+const path = require('node:path');
+const Logger = require('../services/loggerService');
 const {
   REDACTED,
+  installSafeConsole,
   redactSensitive,
   safeEndpoint,
   sanitizeText,
@@ -17,7 +22,8 @@ const SENTINELS = {
   azureApiKey: 'azure-secret-sentinel-0123456789',
   geminiApiKey: 'gemini-secret-sentinel-0123456789',
   paperlessToken: 'paperless-secret-sentinel-0123456789',
-  jwtSecret: 'jwt-secret-sentinel-0123456789'
+  jwtSecret: 'jwt-secret-sentinel-0123456789',
+  vendorSigningKey: 'vendor-key-sentinel-0123456789'
 };
 
 test('redactSensitive recursively removes secret-bearing values', () => {
@@ -32,7 +38,8 @@ test('redactSensitive recursively removes secret-bearing values', () => {
       authorization: `Bearer ${SENTINELS.customApiKey}`,
       cookie: `session=${SENTINELS.jwtSecret}`,
       model: 'gpt-4o-mini',
-      monkey: 'not-sensitive'
+      vendorSigningKey: SENTINELS.vendorSigningKey,
+      ordinaryField: 'not-sensitive'
     }
   };
 
@@ -45,12 +52,32 @@ test('redactSensitive recursively removes secret-bearing values', () => {
   assert.equal(redacted.nested.JWT_SECRET, REDACTED);
   assert.equal(redacted.nested.authorization, REDACTED);
   assert.equal(redacted.nested.cookie, REDACTED);
+  assert.equal(redacted.nested.vendorSigningKey, REDACTED);
   assert.equal(redacted.nested.model, 'gpt-4o-mini');
-  assert.equal(redacted.nested.monkey, 'not-sensitive');
+  assert.equal(redacted.nested.ordinaryField, 'not-sensitive');
 
   const serialized = JSON.stringify(redacted);
   for (const sentinel of Object.values(SENTINELS)) {
     assert.equal(serialized.includes(sentinel), false);
+  }
+});
+
+test('sanitizeText redacts credentials inside JSON strings', () => {
+  const value = JSON.stringify({
+    Authorization: `Token ${SENTINELS.paperlessToken}`,
+    vendorSigningKey: SENTINELS.vendorSigningKey,
+    nested: {
+      paperlessToken: SENTINELS.paperlessToken
+    }
+  });
+
+  const sanitized = sanitizeText(value);
+  const parsed = JSON.parse(sanitized);
+  assert.equal(parsed.Authorization, REDACTED);
+  assert.equal(parsed.vendorSigningKey, REDACTED);
+  assert.equal(parsed.nested.paperlessToken, REDACTED);
+  for (const sentinel of Object.values(SENTINELS)) {
+    assert.equal(sanitized.includes(sentinel), false);
   }
 });
 
@@ -95,6 +122,81 @@ test('redactSensitive handles circular objects', () => {
   const value = { name: 'test' };
   value.self = value;
   assert.deepEqual(redactSensitive(value), { name: 'test', self: '[Circular]' });
+});
+
+test('safe console and file logger redact Axios-shaped credential output', (t) => {
+  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'paperless-ai-logs-'));
+  const originalConsole = {
+    log: console.log,
+    error: console.error,
+    warn: console.warn,
+    info: console.info,
+    debug: console.debug
+  };
+  const captured = [];
+  for (const level of Object.keys(originalConsole)) {
+    console[level] = (...args) => captured.push([level, ...args]);
+  }
+
+  const logger = new Logger({
+    logDir,
+    logFile: 'security.log',
+    timestamp: false
+  });
+  t.after(() => {
+    logger.restore();
+    Object.assign(console, originalConsole);
+    fs.rmSync(logDir, { recursive: true, force: true });
+  });
+
+  const axiosError = new Error(`Authorization: Token ${SENTINELS.paperlessToken}`);
+  axiosError.code = 'ERR_BAD_RESPONSE';
+  axiosError.response = {
+    status: 401,
+    config: {
+      headers: {
+        Authorization: `Token ${SENTINELS.paperlessToken}`
+      },
+      data: JSON.stringify({
+        vendorSigningKey: SENTINELS.vendorSigningKey
+      })
+    }
+  };
+  console.error('Paperless request failed:', axiosError, {
+    Authorization: `Token ${SENTINELS.paperlessToken}`,
+    vendorSigningKey: SENTINELS.vendorSigningKey,
+    serialized: JSON.stringify({
+      customArbitraryKey: SENTINELS.vendorSigningKey,
+      paperlessToken: SENTINELS.paperlessToken
+    })
+  });
+
+  const output = `${JSON.stringify(captured)}\n${fs.readFileSync(path.join(logDir, 'security.log'), 'utf8')}`;
+  for (const sentinel of Object.values(SENTINELS)) {
+    assert.equal(output.includes(sentinel), false);
+  }
+  assert.match(output, /\[REDACTED\]/);
+});
+
+test('installSafeConsole sanitizes arbitrary console implementations', () => {
+  const captured = [];
+  const fakeConsole = Object.fromEntries(
+    ['log', 'error', 'warn', 'info', 'debug'].map((level) => [
+      level,
+      (...args) => captured.push([level, ...args])
+    ])
+  );
+  const restore = installSafeConsole(fakeConsole);
+
+  fakeConsole.error({
+    Authorization: `Token ${SENTINELS.paperlessToken}`,
+    anotherServiceKey: SENTINELS.vendorSigningKey
+  });
+  restore();
+
+  const output = JSON.stringify(captured);
+  assert.equal(output.includes(SENTINELS.paperlessToken), false);
+  assert.equal(output.includes(SENTINELS.vendorSigningKey), false);
 });
 
 test('custom provider validation never logs its API key', async (t) => {

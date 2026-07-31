@@ -22,6 +22,7 @@ esac
 
 export RAG_SERVICE_URL
 export RAG_SERVICE_ENABLED
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 
 cleanup() {
   local exit_code=$?

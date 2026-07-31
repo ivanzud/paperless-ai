@@ -3691,12 +3691,20 @@ router.get('/health', async (req, res) => {
       });
     }
 
-    res.json({ status: 'healthy' });
+    const health = { status: 'healthy', rag: 'disabled' };
+    if (process.env.RAG_SERVICE_ENABLED === 'true') {
+      await RAGService.checkReadiness();
+      health.rag = 'ready';
+    }
+
+    res.json(health);
   } catch (error) {
-    console.error('Health check failed:', error);
-    res.status(500).json({ 
-      status: 'error', 
-      message: error.message 
+    console.error('Health check failed:', toSafeError(error));
+    res.status(503).json({
+      status: 'error',
+      message: error.code === 'RAG_NOT_READY'
+        ? 'RAG service is not ready'
+        : 'Application health check failed'
     });
   }
 });
@@ -4575,7 +4583,7 @@ router.post('/settings', express.json(), async (req, res) => {
         await paperlessService.createCustomFieldSafely(field.value, field.data_type, field.currency);
       }
     } catch (error) {
-      console.log('[ERROR] Error creating custom fields:', error);
+      console.error('[ERROR] Error creating custom fields:', toSafeError(error));
     }
 
     res.json({ 

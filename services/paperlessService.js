@@ -6,6 +6,7 @@ const path = require('path');
 const { parse, isValid, parseISO, format } = require('date-fns');
 const metadataNormalizationService = require('./metadataNormalizationService');
 const { normalizeCustomFieldValueForPaperless } = require('./serviceUtils');
+const { toSafeError } = require('../utils/logSanitizer');
 
 const AI_NOTE_PREFIX = '[Paperless-AI]';
 
@@ -1965,8 +1966,7 @@ async getOrCreateDocumentType(name, options = {}) {
       console.log(`[SUCCESS] Updated document ${documentId} with:`, updateData);
       return await this.getDocument(documentId);
     } catch (error) {
-      console.log(error);
-      console.error(`[ERROR] updating document ${documentId}:`, error.message);
+      console.error(`[ERROR] updating document ${documentId}:`, toSafeError(error));
       return null;
     }
   }

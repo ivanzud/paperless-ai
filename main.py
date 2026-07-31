@@ -14,6 +14,7 @@ import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -1983,6 +1984,38 @@ async def get_status():
     status_dict["ai_model"] = "llama3.2:latest"
     
     return status_dict
+
+@app.get("/ready", response_model=dict)
+async def get_readiness():
+    """Report whether the live RAG objects can serve the context endpoint."""
+    data_manager = global_state.data_manager
+    search_engine = global_state.search_engine
+    checks = {
+        "models_initialized": bool(data_manager and data_manager.is_initialized),
+        "search_engine_initialized": bool(search_engine and search_engine.is_initialized),
+        "chroma_initialized": bool(
+            data_manager
+            and data_manager.chroma_initialized
+            and data_manager.collection is not None
+            and search_engine
+            and search_engine.collection is not None
+        ),
+        "bm25_initialized": bool(
+            search_engine
+            and search_engine.bm25_initialized
+            and search_engine.bm25 is not None
+            and search_engine.tokenized_corpus
+        ),
+    }
+    payload = {
+        "status": "ready" if all(checks.values()) else "not_ready",
+        "ready": all(checks.values()),
+        "checks": checks,
+    }
+
+    if not payload["ready"]:
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 @app.get("/indexing/status", response_model=IndexingStatus)
 async def get_indexing_status():

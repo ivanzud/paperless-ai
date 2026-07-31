@@ -17,6 +17,7 @@ services:
       - "${PAPERLESS_AI_PORT:-3000}:${PAPERLESS_AI_PORT:-3000}"
     environment:
       PAPERLESS_AI_PORT: ${PAPERLESS_AI_PORT:-3000}
+      HF_HUB_DISABLE_XET: "1"
     volumes:
       - paperless-ai_data:/app/data
     stop_grace_period: 30s
