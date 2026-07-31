@@ -167,8 +167,16 @@ fail_closed_output = io.StringIO()
 fail_closed_handler = logging.StreamHandler(fail_closed_output)
 fail_closed_handler.setFormatter(
     logging.Formatter(
-        "%(message)s %(opaque_extra)s",
-        defaults={"opaque_extra": "-"},
+        (
+            "%(message)s %(opaque_extra)s number=%(safe_number)d "
+            "ratio=%(safe_ratio).2f enabled=%(safe_enabled)s"
+        ),
+        defaults={
+            "opaque_extra": "-",
+            "safe_number": 0,
+            "safe_ratio": 0.0,
+            "safe_enabled": False,
+        },
     )
 )
 fail_closed_record = logging.LogRecord(
@@ -183,6 +191,9 @@ fail_closed_record = logging.LogRecord(
 fail_closed_record.opaque_extra = BrokenExtraValue(
     "fail-closed-extra-secret-canary"
 )
+fail_closed_record.safe_number = 210
+fail_closed_record.safe_ratio = 0.75
+fail_closed_record.safe_enabled = True
 fail_closed_handler.handle(fail_closed_record)
 
 access_output = io.StringIO()
@@ -255,8 +266,9 @@ assert "make-record-nested-safe-marker" in output
 assert "direct-record-safe-marker" in output
 assert "direct-record-nested-safe-marker" in output
 assert "[log sanitization failed]" in output
-for safe_number in ("42", "84", "126", "168"):
+for safe_number in ("42", "84", "126", "168", "210"):
     assert f"number={safe_number}" in output
+assert "ratio=0.75 enabled=True" in output
 assert 'GET /private HTTP/1.1" 200' in output
 assert "[REDACTED]" in output
 
