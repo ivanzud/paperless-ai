@@ -14,6 +14,8 @@ canaries = {
     "args_json": "args-json-secret-canary",
     "args_positional": "args-positional-secret-canary",
     "prefixed": "prefixed-json-secret-canary",
+    "double_json": "double-json-secret-canary",
+    "prefixed_double_json": "prefixed-double-json-secret-canary",
     "escaped_json": "escaped-json-suffix-secret-canary",
     "url_comma": "url-comma-suffix-secret-canary",
     "url_semicolon": "url-semicolon-suffix-secret-canary",
@@ -28,6 +30,13 @@ canaries = {
     "aws4_auth": "aws4-auth-secret-canary",
     "cookie_first": "cookie-first-secret-canary",
     "cookie_second": "cookie-second-secret-canary",
+    "namespace_basic": "namespace-basic-secret-canary",
+    "namespace_digest": "namespace-digest-secret-canary",
+    "namespace_cookie": "namespace-cookie-secret-canary",
+    "folded_auth": "folded-auth-secret-canary",
+    "folded_cookie": "folded-cookie-secret-canary",
+    "policy_auth": "policy-auth-secret-canary",
+    "policy_cookie": "policy-cookie-secret-canary",
     "assignment_comma": "assignment-comma-suffix-secret-canary",
     "assignment_semicolon": "assignment-semicolon-suffix-secret-canary",
     "malformed_url": "malformed-url-secret-canary",
@@ -36,6 +45,11 @@ canaries = {
     "redis_uri": "redis-uri-secret-canary",
     "amqp_uri": "amqp-uri-secret-canary",
     "encoded_key": "encoded-key-secret-canary",
+    "signature_map": "signature-map-secret-canary",
+    "amz_signature_map": "amz-signature-map-secret-canary",
+    "auth_map": "auth-map-secret-canary",
+    "authentication_map": "authentication-map-secret-canary",
+    "unicode_repr": "unicode-repr-secret-canary",
     "idempotent": "idempotent-secret-canary",
     "whitespace_password": "whitespace-password-secret-canary",
     "whitespace_secret": "whitespace-secret-secret-canary",
@@ -45,6 +59,7 @@ canaries = {
     "deep": "deep-secret-canary",
     "late_item": "late-item-secret-canary",
     "long": "long-text-secret-canary",
+    "long_double": "long-double-json-secret-canary",
     "exception": "exception-secret-canary",
     "stack": "stack-secret-canary",
     "stack_text": "stack-text-secret-canary",
@@ -127,6 +142,28 @@ main.logger.error(
         }
     )
 )
+double_json_payload = json.dumps(
+    {
+        "password": canaries["double_json"],
+        "safeField": "double-json-safe-marker",
+    }
+)
+double_json_input = json.dumps(double_json_payload)
+double_json_once = main._sanitize_log_text(double_json_input)
+assert double_json_once == main._sanitize_log_text(double_json_once)
+assert canaries["double_json"] not in double_json_once
+main.logger.error(double_json_input)
+main.logger.error(
+    "Prefixed double JSON payload: "
+    + json.dumps(
+        json.dumps(
+            {
+                "password": canaries["prefixed_double_json"],
+                "safeField": "prefixed-double-json-safe-marker",
+            }
+        )
+    )
+)
 main.logger.error(
     "Escaped JSON payload: "
     + json.dumps(
@@ -185,6 +222,37 @@ main.logger.error(
     canaries["cookie_second"],
 )
 main.logger.error(
+    "namespace-basic-safe-marker request.headers.Authorization: Basic %s",
+    canaries["namespace_basic"],
+)
+main.logger.error(
+    (
+        "namespace-digest-safe-marker "
+        "http.request.header.authorization: Digest response=%s"
+    ),
+    canaries["namespace_digest"],
+)
+main.logger.error(
+    "namespace-cookie-safe-marker request.headers.Cookie: first=ONE; second=%s",
+    canaries["namespace_cookie"],
+)
+main.logger.error(
+    "folded-auth-safe-marker Authorization: Basic\n %s",
+    canaries["folded_auth"],
+)
+main.logger.error(
+    "folded-cookie-safe-marker Cookie: first=ONE;\n second=%s",
+    canaries["folded_cookie"],
+)
+main.logger.error(
+    "explicit-policy-auth-safe-marker Authorization: policy %s",
+    canaries["policy_auth"],
+)
+main.logger.error(
+    "explicit-policy-cookie-safe-marker Cookie: policy=%s",
+    canaries["policy_cookie"],
+)
+main.logger.error(
     "assignment-safe-marker password=prefix,%s;%s",
     canaries["assignment_comma"],
     canaries["assignment_semicolon"],
@@ -215,6 +283,21 @@ main.logger.error(
     + canaries["encoded_key"]
     + r'", "safeField": "encoded-json-safe-marker"}'
 )
+main.logger.error(
+    {
+        "Signature": canaries["signature_map"],
+        "X-Amz-Signature": canaries["amz_signature_map"],
+        "auth": ["user", canaries["auth_map"]],
+        "authentication": canaries["authentication_map"],
+        "safeField": "structured-auth-safe-marker",
+    }
+)
+main.logger.error(
+    "unicode-repr-safe-marker Payload: "
+    + r"{'pass\u0077ord': '"
+    + canaries["unicode_repr"]
+    + r"', 'safeField': 'unicode-repr-inner-safe-marker'}"
+)
 main.logger.info(
     "ordinary-marker-one Using password %s",
     canaries["whitespace_password"],
@@ -234,6 +317,10 @@ main.logger.info(
 main.logger.info("safe-state-marker PAPERLESS_API_TOKEN: [NOT SET]")
 main.logger.info("safe-set-marker PAPERLESS_API_TOKEN: [SET]")
 main.logger.info("safe-prose-marker password policy remains enforced")
+main.logger.info(
+    "header-prose-a-safe-marker authorization policy remains enforced"
+)
+main.logger.info("header-prose-c-safe-marker cookie policy remains enforced")
 
 idempotent_input = (
     'Idempotent payload: {"password": "'
@@ -275,6 +362,23 @@ main.logger.error(
     + ("x" * 20_000)
     + f" password={canaries['long']}"
 )
+long_double_input = (
+    "Long double payload: "
+    + json.dumps(
+        json.dumps(
+            {
+                "password": canaries["long_double"],
+                "safeField": "long-double-json-safe-marker",
+                "padding": "x" * 20_000,
+            }
+        )
+    )
+)
+long_double_output = main._sanitize_log_text(long_double_input)
+assert canaries["long_double"] not in long_double_output
+assert "[TRUNCATED]" in long_double_output
+assert "long-double-json-safe-marker" in long_double_output
+main.logger.info("long-double-json-pass-safe-marker")
 
 try:
     raise ValueError(

@@ -94,6 +94,8 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'args-json-secret-canary',
     'args-positional-secret-canary',
     'prefixed-json-secret-canary',
+    'double-json-secret-canary',
+    'prefixed-double-json-secret-canary',
     'escaped-json-suffix-secret-canary',
     'url-comma-suffix-secret-canary',
     'url-semicolon-suffix-secret-canary',
@@ -108,6 +110,13 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'aws4-auth-secret-canary',
     'cookie-first-secret-canary',
     'cookie-second-secret-canary',
+    'namespace-basic-secret-canary',
+    'namespace-digest-secret-canary',
+    'namespace-cookie-secret-canary',
+    'folded-auth-secret-canary',
+    'folded-cookie-secret-canary',
+    'policy-auth-secret-canary',
+    'policy-cookie-secret-canary',
     'assignment-comma-suffix-secret-canary',
     'assignment-semicolon-suffix-secret-canary',
     'malformed-url-secret-canary',
@@ -116,6 +125,11 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'redis-uri-secret-canary',
     'amqp-uri-secret-canary',
     'encoded-key-secret-canary',
+    'signature-map-secret-canary',
+    'amz-signature-map-secret-canary',
+    'auth-map-secret-canary',
+    'authentication-map-secret-canary',
+    'unicode-repr-secret-canary',
     'idempotent-secret-canary',
     'whitespace-password-secret-canary',
     'whitespace-secret-secret-canary',
@@ -125,6 +139,7 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'deep-secret-canary',
     'late-item-secret-canary',
     'long-text-secret-canary',
+    'long-double-json-secret-canary',
     'exception-secret-canary',
     'stack-secret-canary',
     'stack-text-secret-canary',
@@ -141,6 +156,8 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'mapping-format-safe-marker',
     'args-positional-safe-marker',
     'prefixed-safe-marker',
+    'double-json-safe-marker',
+    'prefixed-double-json-safe-marker',
     'escaped-json-safe-marker',
     'url-delimiter-safe-marker',
     'ipv6-safe-marker',
@@ -151,6 +168,13 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'digest-auth-safe-marker',
     'aws4-auth-safe-marker',
     'cookie-safe-marker',
+    'namespace-basic-safe-marker',
+    'namespace-digest-safe-marker',
+    'namespace-cookie-safe-marker',
+    'folded-auth-safe-marker',
+    'folded-cookie-safe-marker',
+    'explicit-policy-auth-safe-marker',
+    'explicit-policy-cookie-safe-marker',
     'assignment-safe-marker',
     'malformed-url-safe-marker',
     'postgres-uri-safe-marker',
@@ -159,6 +183,9 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'amqp-uri-safe-marker',
     'encoded-key-safe-marker',
     'encoded-json-safe-marker',
+    'structured-auth-safe-marker',
+    'unicode-repr-safe-marker',
+    'unicode-repr-inner-safe-marker',
     'idempotent-pass-safe-marker',
     'idempotent-safe-marker',
     'ordinary-marker-one',
@@ -169,6 +196,7 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'deep-safe-marker',
     'item-bound-safe-marker',
     'long-text-safe-marker',
+    'long-double-json-pass-safe-marker',
     'exception-log-safe-marker',
     'exception-detail-safe-marker',
     'stack-safe-marker',
@@ -194,6 +222,11 @@ test('Python logs recursively redact structured and serialized secrets', () => {
   assert.match(output, /safe-state-marker PAPERLESS_API_TOKEN: \[NOT SET\]/);
   assert.match(output, /safe-set-marker PAPERLESS_API_TOKEN: \[SET\]/);
   assert.match(output, /safe-prose-marker password policy remains enforced/);
+  assert.match(
+    output,
+    /header-prose-a-safe-marker authorization policy remains enforced/
+  );
+  assert.match(output, /header-prose-c-safe-marker cookie policy remains enforced/);
   for (const canary of secretCanaries) {
     assert.equal(output.includes(canary), false, `Python log exposed ${canary}`);
   }
@@ -224,7 +257,15 @@ test('Python logger filter covers root and future third-party handlers', () => {
     'direct-record-extra-secret-canary',
     'direct-record-url-secret-canary',
     'direct-record-nested-secret-canary',
-    'fail-closed-extra-secret-canary'
+    'fail-closed-extra-secret-canary',
+    'preexisting-override-message-secret-canary',
+    'preexisting-override-extra-secret-canary',
+    'future-override-message-secret-canary',
+    'future-override-extra-secret-canary',
+    'malformed-key-secret-canary',
+    'remote-process-secret-canary',
+    'remote-thread-secret-canary',
+    '123456'
   ];
   const result = runProjectPython([
     path.join(__dirname, 'python_preconfigured_logging_check.py')
@@ -243,8 +284,12 @@ test('Python logger filter covers root and future third-party handlers', () => {
   assert.match(output, /make-record-nested-safe-marker/);
   assert.match(output, /direct-record-safe-marker/);
   assert.match(output, /direct-record-nested-safe-marker/);
+  assert.match(output, /preexisting-override-safe-marker/);
+  assert.match(output, /future-override-safe-marker/);
+  assert.match(output, /remote-core-safe-marker/);
+  assert.match(output, /numeric-sensitive-safe-marker key=0/);
   assert.match(output, /\[log sanitization failed\]/);
-  for (const safeNumber of [42, 84, 126, 168]) {
+  for (const safeNumber of [42, 84, 126, 168, 210]) {
     assert.match(output, new RegExp(`number=${safeNumber}`));
   }
   assert.match(output, /GET \/private HTTP\/1\.1/);
