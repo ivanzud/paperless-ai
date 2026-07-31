@@ -1,0 +1,215 @@
+import json
+
+import main
+
+
+canaries = {
+    "json": "json-quoted-secret-canary",
+    "repr": "repr-dict-secret-canary",
+    "repr_string": "repr-string-secret-canary",
+    "nested": "nested-secret-canary",
+    "tuple": "tuple-secret-canary",
+    "args_mapping": "args-mapping-secret-canary",
+    "args_json": "args-json-secret-canary",
+    "args_positional": "args-positional-secret-canary",
+    "prefixed": "prefixed-json-secret-canary",
+    "escaped_json": "escaped-json-suffix-secret-canary",
+    "url_comma": "url-comma-suffix-secret-canary",
+    "url_semicolon": "url-semicolon-suffix-secret-canary",
+    "ipv6_path": "ipv6-path-secret-canary",
+    "ipv6_query": "ipv6-query-secret-canary",
+    "bearer_comma": "bearer-comma-suffix-secret-canary",
+    "bearer_semicolon": "bearer-semicolon-suffix-secret-canary",
+    "whitespace_password": "whitespace-password-secret-canary",
+    "whitespace_secret": "whitespace-secret-secret-canary",
+    "whitespace_credential": "whitespace-credential-secret-canary",
+    "whitespace_authorization": "whitespace-authorization-secret-canary",
+    "cycle": "cycle-secret-canary",
+    "deep": "deep-secret-canary",
+    "late_item": "late-item-secret-canary",
+    "long": "long-text-secret-canary",
+    "exception": "exception-secret-canary",
+    "stack": "stack-secret-canary",
+    "fail_closed": "fail-closed-secret-canary",
+}
+
+main.logger.error(
+    json.dumps(
+        {
+            "vendorSigningKey": canaries["json"],
+            "safeField": "json-safe-marker",
+        }
+    )
+)
+main.logger.error(
+    {
+        "anotherServiceKey": canaries["repr"],
+        "safeField": "repr-safe-marker",
+    }
+)
+main.logger.error(
+    repr(
+        {
+            "privateSigningKey": canaries["repr_string"],
+            "safeField": "repr-string-safe-marker",
+        }
+    )
+)
+main.logger.error(
+    {
+        "nested": [
+            {
+                "paperlessToken": canaries["nested"],
+                "safeField": "nested-safe-marker",
+            },
+            {
+                "items": (
+                    {
+                        "sessionCookie": canaries["tuple"],
+                        "safeField": "tuple-safe-marker",
+                    },
+                )
+            },
+        ]
+    }
+)
+main.logger.info(
+    "Logger args payload: %s | %s",
+    {
+        "config": {
+            "customApiKey": canaries["args_mapping"],
+            "safeField": "args-mapping-safe-marker",
+        },
+    },
+    json.dumps(
+        {
+            "serviceAuthorization": canaries["args_json"],
+            "safeField": "args-json-safe-marker",
+        }
+    ),
+)
+main.logger.error(
+    "Mapping args payload: %(safeField)s %(vendorSigningKey)s",
+    {
+        "safeField": "mapping-format-safe-marker",
+        "vendorSigningKey": canaries["args_mapping"],
+    },
+)
+main.logger.error(
+    "Inline positional token=%s safeField=%s",
+    canaries["args_positional"],
+    "args-positional-safe-marker",
+)
+main.logger.error(
+    "Prefixed JSON payload: "
+    + json.dumps(
+        {
+            "databasePassword": canaries["prefixed"],
+            "safeField": "prefixed-safe-marker",
+        }
+    )
+)
+main.logger.error(
+    "Escaped JSON payload: "
+    + json.dumps(
+        {
+            "databasePassword": (
+                "prefix-" + chr(92) + chr(34) + canaries["escaped_json"]
+            ),
+            "safeField": "escaped-json-safe-marker",
+        }
+    )
+)
+main.logger.error(
+    "url-delimiter-safe-marker %s",
+    (
+        "https://user:prefix,"
+        f"{canaries['url_comma']};{canaries['url_semicolon']}"
+        "@paperless.example/private"
+    ),
+)
+main.logger.error(
+    "ipv6-safe-marker %s",
+    (
+        "http://[2001:db8::1]:8443/"
+        f"{canaries['ipv6_path']}?token={canaries['ipv6_query']}"
+    ),
+)
+main.logger.error(
+    "bearer-safe-marker Authorization: Bearer prefix,%s;%s",
+    canaries["bearer_comma"],
+    canaries["bearer_semicolon"],
+)
+main.logger.info(
+    "ordinary-marker-one Using password %s",
+    canaries["whitespace_password"],
+)
+main.logger.info(
+    "ordinary-marker-two Using secret %s",
+    canaries["whitespace_secret"],
+)
+main.logger.info(
+    "ordinary-marker-three Credential %s",
+    canaries["whitespace_credential"],
+)
+main.logger.info(
+    "ordinary-marker-four Authorization %s",
+    canaries["whitespace_authorization"],
+)
+
+cyclic_value = {
+    "serviceToken": canaries["cycle"],
+    "safeField": "cycle-safe-marker",
+}
+cyclic_value["self"] = cyclic_value
+main.logger.error(cyclic_value)
+
+deep_value = {"databasePassword": canaries["deep"]}
+for _ in range(1_500):
+    deep_value = {"nested": [deep_value]}
+main.logger.error(
+    {
+        "safeField": "deep-safe-marker",
+        "payload": deep_value,
+    }
+)
+
+many_items = {f"safeItem{index}": index for index in range(300)}
+many_items["lateSigningKey"] = canaries["late_item"]
+main.logger.error(
+    {
+        "safeField": "item-bound-safe-marker",
+        "payload": many_items,
+    }
+)
+main.logger.error(
+    "long-text-safe-marker "
+    + ("x" * 20_000)
+    + f" password={canaries['long']}"
+)
+
+try:
+    raise ValueError(
+        f"password={canaries['exception']} exception-detail-safe-marker"
+    )
+except ValueError:
+    main.logger.exception("exception-log-safe-marker")
+
+main.logger.error(
+    "stack-safe-marker password=%s",
+    canaries["stack"],
+    stack_info=True,
+)
+
+
+class BrokenLogValue:
+    def __init__(self, secret):
+        self.secret = secret
+
+    def __str__(self):
+        raise RuntimeError("intentional log conversion failure")
+
+
+main.logger.error(BrokenLogValue(canaries["fail_closed"]))
+
+print("python-structured-log-canary-ok")

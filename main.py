@@ -1,32 +1,34 @@
-import os
+import ast
+import hashlib
 import json
 import logging
-import hashlib
-import re
-import numpy as np
+import os
 import pickle
-from datetime import datetime
-from typing import List, Dict, Optional, Any, Union, Tuple
+import re
 import time
 import traceback
+from collections.abc import Mapping
+from datetime import datetime
+from typing import List, Dict, Optional, Any, Union, Tuple
 from urllib.parse import urlsplit
 
+import chromadb
+import nltk
+import numpy as np
 import requests
+import torch
 import uvicorn
+from chromadb.utils import embedding_functions
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from dotenv import load_dotenv
-from tqdm import tqdm
-import torch
-from sentence_transformers import SentenceTransformer, CrossEncoder
-import chromadb
-from chromadb.utils import embedding_functions
-from rank_bm25 import BM25Okapi
-import nltk
-from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from pydantic import BaseModel, Field
+from rank_bm25 import BM25Okapi
+from sentence_transformers import SentenceTransformer, CrossEncoder
+from tqdm import tqdm
 
 # Configure logging
 def _safe_endpoint_for_log(value: Optional[str]) -> str:
@@ -44,40 +46,214 @@ def _safe_endpoint_for_log(value: Optional[str]) -> str:
         return "[invalid endpoint]"
 
 
-_LOG_URL_PATTERN = re.compile(r"https?://[^\s,;)}\]]+", re.IGNORECASE)
-_LOG_AUTH_PATTERN = re.compile(r"\b(Bearer|Token)\s+[^\s,;}]+", re.IGNORECASE)
+_LOG_REDACTED = "[REDACTED]"
+_LOG_TRUNCATED = "[TRUNCATED]"
+_LOG_SANITIZATION_FAILED = "[REDACTED] [log sanitization failed]"
+_MAX_LOG_TEXT_LENGTH = 16_384
+_MAX_LOG_DEPTH = 64
+_MAX_LOG_COLLECTION_ITEMS = 256
+_LOG_URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
+_LOG_AUTH_PATTERN = re.compile(r"\b(Bearer|Token)\s+\S+", re.IGNORECASE)
+_LOG_KEY_CHAR_PATTERN = r"[a-z0-9_.-]"
+_LOG_SENSITIVE_KEY_PATTERN = (
+    rf"(?:{_LOG_KEY_CHAR_PATTERN}*key|"
+    rf"{_LOG_KEY_CHAR_PATTERN}*"
+    r"(?:token|secret|password|passwd|authorization|cookie|credential)"
+    rf"{_LOG_KEY_CHAR_PATTERN}*)"
+)
 _LOG_SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"((?:[a-z0-9_-]*key|[a-z0-9_-]*(?:token|secret|password|authorization|cookie))"
-    r"\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)",
+    rf"(?<!{_LOG_KEY_CHAR_PATTERN})"
+    rf"([\"']?{_LOG_SENSITIVE_KEY_PATTERN}"
+    rf"(?!{_LOG_KEY_CHAR_PATTERN})[\"']?\s*[=:]\s*)"
+    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;}]+)",
     re.IGNORECASE,
+)
+_LOG_SECRET_WHITESPACE_PATTERN = re.compile(
+    rf"(?<!{_LOG_KEY_CHAR_PATTERN})"
+    rf"({_LOG_SENSITIVE_KEY_PATTERN})"
+    rf"(?!{_LOG_KEY_CHAR_PATTERN})"
+    r"(?:\s+(?:is|value|header))?\s+\S+",
+    re.IGNORECASE,
+)
+_LOG_SENSITIVE_KEY_TERMS = (
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "authorization",
+    "cookie",
+    "credential",
 )
 
 
-def _sanitize_log_text(value: Any) -> str:
+def _is_sensitive_log_key(value: Any) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", str(value).lower())
+    return normalized.endswith("key") or any(
+        term in normalized for term in _LOG_SENSITIVE_KEY_TERMS
+    )
+
+
+def _sanitize_log_fragments(value: Any) -> str:
     text = str(value)
+    if len(text) > _MAX_LOG_TEXT_LENGTH:
+        text = f"{text[:_MAX_LOG_TEXT_LENGTH]} {_LOG_TRUNCATED}"
     text = _LOG_URL_PATTERN.sub(
-        lambda match: _safe_endpoint_for_log(match.group(0)),
+        lambda match: _safe_endpoint_for_log(
+            match.group(0).rstrip(".,;:!?)}\"'")
+        ),
         text,
     )
-    text = _LOG_AUTH_PATTERN.sub(r"\1 [REDACTED]", text)
-    return _LOG_SECRET_ASSIGNMENT_PATTERN.sub(r"\1[REDACTED]", text)
+    text = _LOG_AUTH_PATTERN.sub(rf"\1 {_LOG_REDACTED}", text)
+    text = _LOG_SECRET_ASSIGNMENT_PATTERN.sub(rf"\1{_LOG_REDACTED}", text)
+    for _ in range(8):
+        updated = _LOG_SECRET_WHITESPACE_PATTERN.sub(
+            rf"\1 {_LOG_REDACTED}",
+            text,
+        )
+        if updated == text:
+            return text
+        text = updated
+    return _LOG_REDACTED
+
+
+def _redact_log_value(
+    value: Any,
+    active_ids: Optional[set[int]] = None,
+    depth: int = 0,
+) -> Any:
+    if depth >= _MAX_LOG_DEPTH:
+        return _LOG_TRUNCATED
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _sanitize_log_text(value, depth)
+    if isinstance(value, bytes):
+        return _sanitize_log_text(value.decode("utf-8", errors="replace"), depth)
+    if not isinstance(value, (Mapping, list, tuple)):
+        return _sanitize_log_text(value, depth)
+
+    if active_ids is None:
+        active_ids = set()
+    value_id = id(value)
+    if value_id in active_ids:
+        return "[Circular]"
+
+    active_ids.add(value_id)
+    try:
+        if isinstance(value, Mapping):
+            redacted_mapping = {}
+            for index, (key, item) in enumerate(value.items()):
+                if index >= _MAX_LOG_COLLECTION_ITEMS:
+                    redacted_mapping[_LOG_TRUNCATED] = (
+                        f"more than {_MAX_LOG_COLLECTION_ITEMS} items"
+                    )
+                    break
+                redacted_mapping[key] = (
+                    _LOG_REDACTED
+                    if _is_sensitive_log_key(key)
+                    else _redact_log_value(item, active_ids, depth + 1)
+                )
+            return redacted_mapping
+
+        if isinstance(value, list):
+            redacted_list = [
+                _redact_log_value(item, active_ids, depth + 1)
+                for item in value[:_MAX_LOG_COLLECTION_ITEMS]
+            ]
+            if len(value) > _MAX_LOG_COLLECTION_ITEMS:
+                redacted_list.append(_LOG_TRUNCATED)
+            return redacted_list
+
+        redacted_tuple = tuple(
+            _redact_log_value(item, active_ids, depth + 1)
+            for item in value[:_MAX_LOG_COLLECTION_ITEMS]
+        )
+        if len(value) > _MAX_LOG_COLLECTION_ITEMS:
+            redacted_tuple += (_LOG_TRUNCATED,)
+        return redacted_tuple
+    finally:
+        active_ids.remove(value_id)
+
+
+def _sanitize_log_text(value: Any, depth: int = 0) -> str:
+    if depth >= _MAX_LOG_DEPTH:
+        return _LOG_TRUNCATED
+
+    text = str(value)
+    if len(text) > _MAX_LOG_TEXT_LENGTH:
+        return _sanitize_log_fragments(text)
+
+    trimmed = text.strip()
+    is_structured_literal = (
+        len(trimmed) >= 2
+        and (trimmed[0], trimmed[-1]) in {
+            ("{", "}"),
+            ("[", "]"),
+            ("(", ")"),
+        }
+    )
+    if is_structured_literal:
+        if trimmed[0] in "[{":
+            try:
+                parsed_json = json.loads(trimmed)
+                return json.dumps(
+                    _redact_log_value(parsed_json, depth=depth + 1),
+                    ensure_ascii=False,
+                    default=str,
+                )
+            except (json.JSONDecodeError, RecursionError):
+                pass
+
+        try:
+            parsed_literal = ast.literal_eval(trimmed)
+            if isinstance(parsed_literal, (Mapping, list, tuple)):
+                return repr(_redact_log_value(parsed_literal, depth=depth + 1))
+        except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
+            pass
+
+    return _sanitize_log_fragments(text)
 
 
 class _SensitiveLogFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = _sanitize_log_text(record.getMessage())
-        record.args = ()
+        try:
+            if not isinstance(record.msg, str) or not record.args:
+                record.msg = _redact_log_value(record.msg)
+            record.args = _redact_log_value(record.args)
+            try:
+                message = record.getMessage()
+            except (KeyError, TypeError, ValueError):
+                message = f"{record.msg} [logging arguments omitted]"
+            record.msg = _sanitize_log_fragments(message)
+            record.args = ()
+
+            if record.exc_info:
+                record.exc_text = _sanitize_log_text(
+                    "".join(traceback.format_exception(*record.exc_info))
+                )
+                record.exc_info = None
+            elif record.exc_text:
+                record.exc_text = _sanitize_log_text(record.exc_text)
+            if record.stack_info:
+                record.stack_info = _sanitize_log_text(record.stack_info)
+        except Exception:
+            record.msg = _LOG_SANITIZATION_FAILED
+            record.args = ()
+            record.exc_info = None
+            record.exc_text = None
+            record.stack_info = None
         return True
 
 
+_sensitive_log_filter = _SensitiveLogFilter()
 _stream_handler = logging.StreamHandler()
-_stream_handler.addFilter(_SensitiveLogFilter())
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[_stream_handler]
 )
 logger = logging.getLogger("RAGZ")
+logger.addFilter(_sensitive_log_filter)
 
 # Load environment variables from data directory
 data_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', '.env')

@@ -82,3 +82,93 @@ test('Python startup logs redact Paperless URL and token canaries', () => {
     assert.equal(output.includes(canary), false, `Python log exposed ${canary}`);
   }
 });
+
+test('Python logs recursively redact structured and serialized secrets', () => {
+  const secretCanaries = [
+    'json-quoted-secret-canary',
+    'repr-dict-secret-canary',
+    'repr-string-secret-canary',
+    'nested-secret-canary',
+    'tuple-secret-canary',
+    'args-mapping-secret-canary',
+    'args-json-secret-canary',
+    'args-positional-secret-canary',
+    'prefixed-json-secret-canary',
+    'escaped-json-suffix-secret-canary',
+    'url-comma-suffix-secret-canary',
+    'url-semicolon-suffix-secret-canary',
+    'ipv6-path-secret-canary',
+    'ipv6-query-secret-canary',
+    'bearer-comma-suffix-secret-canary',
+    'bearer-semicolon-suffix-secret-canary',
+    'whitespace-password-secret-canary',
+    'whitespace-secret-secret-canary',
+    'whitespace-credential-secret-canary',
+    'whitespace-authorization-secret-canary',
+    'cycle-secret-canary',
+    'deep-secret-canary',
+    'late-item-secret-canary',
+    'long-text-secret-canary',
+    'exception-secret-canary',
+    'stack-secret-canary',
+    'fail-closed-secret-canary'
+  ];
+  const safeMarkers = [
+    'json-safe-marker',
+    'repr-safe-marker',
+    'repr-string-safe-marker',
+    'nested-safe-marker',
+    'tuple-safe-marker',
+    'args-mapping-safe-marker',
+    'args-json-safe-marker',
+    'mapping-format-safe-marker',
+    'args-positional-safe-marker',
+    'prefixed-safe-marker',
+    'escaped-json-safe-marker',
+    'url-delimiter-safe-marker',
+    'ipv6-safe-marker',
+    'bearer-safe-marker',
+    'ordinary-marker-one',
+    'ordinary-marker-two',
+    'ordinary-marker-three',
+    'ordinary-marker-four',
+    'cycle-safe-marker',
+    'deep-safe-marker',
+    'item-bound-safe-marker',
+    'long-text-safe-marker',
+    'exception-log-safe-marker',
+    'exception-detail-safe-marker',
+    'stack-safe-marker'
+  ];
+  const result = runProjectPython([
+    path.join(__dirname, 'python_log_sanitizer_check.py')
+  ]);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.match(output, /python-structured-log-canary-ok/);
+  assert.match(output, /\[REDACTED\]/);
+  assert.match(output, /\[TRUNCATED\]/);
+  assert.match(output, /\[log sanitization failed\]/);
+  assert.match(output, /http:\/\/\[2001:db8::1\]:8443/);
+  for (const canary of secretCanaries) {
+    assert.equal(output.includes(canary), false, `Python log exposed ${canary}`);
+  }
+  for (const marker of safeMarkers) {
+    assert.equal(output.includes(marker), true, `Python log lost ${marker}`);
+  }
+});
+
+test('Python logger filter survives preconfigured root logging', () => {
+  const secret = 'preconfigured-root-secret-canary';
+  const result = runProjectPython([
+    path.join(__dirname, 'python_preconfigured_logging_check.py')
+  ]);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.match(output, /python-preconfigured-log-canary-ok/);
+  assert.match(output, /preconfigured-safe-marker/);
+  assert.match(output, /\[REDACTED\]/);
+  assert.equal(output.includes(secret), false);
+});
