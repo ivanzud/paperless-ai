@@ -216,6 +216,9 @@ def _sanitize_log_text(value: Any, depth: int = 0) -> str:
 
 class _SensitiveLogFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
+        if getattr(record, "_paperless_ai_sanitized", False):
+            return True
+
         try:
             if not isinstance(record.msg, str) or not record.args:
                 record.msg = _redact_log_value(record.msg)
@@ -242,16 +245,31 @@ class _SensitiveLogFilter(logging.Filter):
             record.exc_info = None
             record.exc_text = None
             record.stack_info = None
+        record._paperless_ai_sanitized = True
         return True
 
 
 _sensitive_log_filter = _SensitiveLogFilter()
 _stream_handler = logging.StreamHandler()
+_stream_handler.addFilter(_sensitive_log_filter)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[_stream_handler]
 )
+for _root_handler in logging.getLogger().handlers:
+    _root_handler.addFilter(_sensitive_log_filter)
+
+_previous_log_record_factory = logging.getLogRecordFactory()
+
+
+def _sanitizing_log_record_factory(*args, **kwargs):
+    record = _previous_log_record_factory(*args, **kwargs)
+    _sensitive_log_filter.filter(record)
+    return record
+
+
+logging.setLogRecordFactory(_sanitizing_log_record_factory)
 logger = logging.getLogger("RAGZ")
 logger.addFilter(_sensitive_log_filter)
 

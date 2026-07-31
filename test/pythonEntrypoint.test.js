@@ -170,8 +170,12 @@ test('Python logs recursively redact structured and serialized secrets', () => {
   }
 });
 
-test('Python logger filter survives preconfigured root logging', () => {
-  const secret = 'preconfigured-root-secret-canary';
+test('Python logger filter covers root and future third-party handlers', () => {
+  const secrets = [
+    'preconfigured-root-secret-canary',
+    'hf-signature-secret-canary',
+    'late-handler-secret-canary'
+  ];
   const result = runProjectPython([
     path.join(__dirname, 'python_preconfigured_logging_check.py')
   ]);
@@ -180,6 +184,10 @@ test('Python logger filter survives preconfigured root logging', () => {
   const output = `${result.stdout}\n${result.stderr}`;
   assert.match(output, /python-preconfigured-log-canary-ok/);
   assert.match(output, /preconfigured-safe-marker/);
+  assert.match(output, /third-party-httpx-safe-marker/);
+  assert.match(output, /late-handler-safe-marker/);
   assert.match(output, /\[REDACTED\]/);
-  assert.equal(output.includes(secret), false);
+  for (const secret of secrets) {
+    assert.equal(output.includes(secret), false);
+  }
 });
