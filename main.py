@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any, Union, Tuple
 import time
 import traceback
+from urllib.parse import urlsplit
 
 import requests
 import uvicorn
@@ -28,10 +29,53 @@ from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 
 # Configure logging
+def _safe_endpoint_for_log(value: Optional[str]) -> str:
+    if not value:
+        return "[NOT SET]"
+
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return "[invalid endpoint]"
+        host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+        port = f":{parsed.port}" if parsed.port else ""
+        return f"{parsed.scheme}://{host}{port}"
+    except (TypeError, ValueError):
+        return "[invalid endpoint]"
+
+
+_LOG_URL_PATTERN = re.compile(r"https?://[^\s,;)}\]]+", re.IGNORECASE)
+_LOG_AUTH_PATTERN = re.compile(r"\b(Bearer|Token)\s+[^\s,;}]+", re.IGNORECASE)
+_LOG_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"((?:[a-z0-9_-]*key|[a-z0-9_-]*(?:token|secret|password|authorization|cookie))"
+    r"\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_log_text(value: Any) -> str:
+    text = str(value)
+    text = _LOG_URL_PATTERN.sub(
+        lambda match: _safe_endpoint_for_log(match.group(0)),
+        text,
+    )
+    text = _LOG_AUTH_PATTERN.sub(r"\1 [REDACTED]", text)
+    return _LOG_SECRET_ASSIGNMENT_PATTERN.sub(r"\1[REDACTED]", text)
+
+
+class _SensitiveLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _sanitize_log_text(record.getMessage())
+        record.args = ()
+        return True
+
+
+_stream_handler = logging.StreamHandler()
+_stream_handler.addFilter(_SensitiveLogFilter())
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
+    handlers=[_stream_handler]
 )
 logger = logging.getLogger("RAGZ")
 
@@ -50,9 +94,9 @@ else:
         logger.warning("No .env file found in data directory or locally")
 
 # Debug: Print loaded environment variables for troubleshooting
-logger.info(f"Loaded PAPERLESS_URL: {os.getenv('PAPERLESS_URL')}")
-logger.info(f"Loaded PAPERLESS_NGX_URL: {os.getenv('PAPERLESS_NGX_URL')}")
-logger.info(f"Loaded PAPERLESS_HOST: {os.getenv('PAPERLESS_HOST')}")
+logger.info(f"Loaded PAPERLESS_URL endpoint: {_safe_endpoint_for_log(os.getenv('PAPERLESS_URL'))}")
+logger.info(f"Loaded PAPERLESS_NGX_URL endpoint: {_safe_endpoint_for_log(os.getenv('PAPERLESS_NGX_URL'))}")
+logger.info(f"Loaded PAPERLESS_HOST endpoint: {_safe_endpoint_for_log(os.getenv('PAPERLESS_HOST'))}")
 logger.info(f"Loaded PAPERLESS_API_TOKEN: {'[SET]' if os.getenv('PAPERLESS_API_TOKEN') else '[NOT SET]'}")
 
 # Constants
@@ -360,14 +404,23 @@ class DataManager:
         # Entfernen des /api Suffix falls vorhanden
         if paperless_api_url and paperless_api_url.endswith('/api'):
             paperless_api_url = paperless_api_url[:-4]  # Entfernen der letzten 4 Zeichen (/api)
-            logger.info(f"Removed '/api' suffix from URL: {paperless_api_url}")
+            logger.info(
+                "Removed '/api' suffix from Paperless endpoint: %s",
+                _safe_endpoint_for_log(paperless_api_url),
+            )
         
         self.paperless_url = paperless_api_url
         self.paperless_token = os.getenv("PAPERLESS_TOKEN") or os.getenv("PAPERLESS_API_TOKEN") or os.getenv("PAPERLESS_APIKEY")
         self.paperless_ssl_verify: Union[bool, str] = self._get_paperless_ssl_verify_setting()
         
         # Debug-Informationen ausgeben
-        logger.info(f"Environment variables: PAPERLESS_API_URL={os.getenv('PAPERLESS_API_URL')}, PAPERLESS_URL={os.getenv('PAPERLESS_URL')}, PAPERLESS_NGX_URL={os.getenv('PAPERLESS_NGX_URL')}, PAPERLESS_HOST={os.getenv('PAPERLESS_HOST')}")
+        logger.info(
+            "Paperless endpoints: PAPERLESS_API_URL=%s, PAPERLESS_URL=%s, PAPERLESS_NGX_URL=%s, PAPERLESS_HOST=%s",
+            _safe_endpoint_for_log(os.getenv("PAPERLESS_API_URL")),
+            _safe_endpoint_for_log(os.getenv("PAPERLESS_URL")),
+            _safe_endpoint_for_log(os.getenv("PAPERLESS_NGX_URL")),
+            _safe_endpoint_for_log(os.getenv("PAPERLESS_HOST")),
+        )
         logger.info(f"Environment variables: PAPERLESS_TOKEN={'[SET]' if os.getenv('PAPERLESS_TOKEN') else '[NOT SET]'}, PAPERLESS_API_TOKEN={'[SET]' if os.getenv('PAPERLESS_API_TOKEN') else '[NOT SET]'}, PAPERLESS_APIKEY={'[SET]' if os.getenv('PAPERLESS_APIKEY') else '[NOT SET]'}")
         logger.info(f"Environment variables: PAPERLESS_VERIFY_SSL={os.getenv('PAPERLESS_VERIFY_SSL')}, PAPERLESS_SSL_VERIFY={os.getenv('PAPERLESS_SSL_VERIFY')}, PAPERLESS_CA_BUNDLE={os.getenv('PAPERLESS_CA_BUNDLE')}")
         
@@ -491,7 +544,10 @@ class DataManager:
     
     def fetch_documents_from_api(self):
         """Fetch all documents from Paperless-NGX API with pagination"""
-        logger.info(f"Fetching documents from Paperless-NGX API: {self.paperless_url}")
+        logger.info(
+            "Fetching documents from Paperless-NGX endpoint: %s",
+            _safe_endpoint_for_log(self.paperless_url),
+        )
         
         documents = []
         page = 1
@@ -501,7 +557,11 @@ class DataManager:
             logger.info(f"Fetching page {page}")
             try:
                 url = f"{self.paperless_url}/api/documents/?page={page}&page_size=100"
-                logger.info(f"Making request to: {url}")
+                logger.info(
+                    "Making Paperless request: endpoint=%s resource=documents page=%s",
+                    _safe_endpoint_for_log(url),
+                    page,
+                )
                 
                 response = self._paperless_get(url, timeout=30)
                 
@@ -2210,9 +2270,9 @@ async def check_health():
     return health_status
 
 # Main entry point with configuration options
-if __name__ == "__main__":
+def build_argument_parser():
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="RAGZ Document Search API")
     parser.add_argument("--port", type=int, default=8000, help="Port to run the server on")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the server on")
@@ -2222,44 +2282,45 @@ if __name__ == "__main__":
     parser.add_argument("--check-new", action="store_true", help="Check for new documents on startup")
     parser.add_argument("--skip-check", action="store_true", help="Skip checking for new documents even with --initialize")
     parser.add_argument("--rebuild-indexes", action="store_true", help="Force rebuild of BM25 and ChromaDB indexes on startup")
-    
-    args = parser.parse_args()
-    
-    # If initialization is requested from command line, set this for startup
+    return parser
+
+
+def register_cli_startup_handlers(app_instance, args):
+    """Register CLI-requested lifecycle handlers on the app Uvicorn will serve."""
     if args.initialize:
         logger.info("Auto-initialization requested via command line")
         if args.skip_check:
             logger.info("Will skip checking for new documents during initialization")
-        
-        @app.on_event("startup")
+
+        @app_instance.on_event("startup")
         async def initialize_on_startup():
             logger.info("Running initialization after startup")
             # Give the app time to start
             time.sleep(1)
-            
+
             # Check if we already have documents loaded
             if global_state.system_status.data_loaded and not args.force_refresh:
                 logger.info(f"Already have {global_state.indexing_status.documents_count} documents loaded")
-                
+
                 # If explicitly told to skip checking, don't run indexing
                 if args.skip_check and not args.rebuild_indexes:
                     logger.info("Skipping document check due to --skip-check flag")
-                    
+
                     # Just make sure search engine is initialized with existing data
                     if not global_state.system_status.index_ready:
                         logger.info("Initializing search engine with existing data")
                         global_state.search_engine.initialize(force_update=args.rebuild_indexes)
-                    
+
                     return
-            
+
             # Only run indexing if we need to
             run_indexing(args.force_refresh, args.check_new)
-    
+
     # If check-new is requested from command line
     elif args.check_new:
         logger.info("Check for new documents requested via command line")
-        
-        @app.on_event("startup")
+
+        @app_instance.on_event("startup")
         async def check_new_on_startup():
             logger.info("Checking for new documents after startup")
             # Give the app time to start
@@ -2270,15 +2331,23 @@ if __name__ == "__main__":
     # If rebuild-indexes is requested from command line
     elif args.rebuild_indexes:
         logger.info("Rebuild indexes requested via command line")
-        
-        @app.on_event("startup")
+
+        @app_instance.on_event("startup")
         async def rebuild_indexes_on_startup():
             logger.info("Rebuilding indexes after startup")
             # Give the app time to start
             time.sleep(2)
-            
+
             if global_state.search_engine and global_state.data_manager.documents:
                 logger.info("Rebuilding indexes with existing documents")
                 global_state.search_engine.initialize(force_update=True)
-    
-    uvicorn.run("main:app", host=args.host, port=args.port, reload=False)
+
+
+def run_cli(argv=None, uvicorn_runner=uvicorn.run):
+    args = build_argument_parser().parse_args(argv)
+    register_cli_startup_handlers(app, args)
+    uvicorn_runner(app, host=args.host, port=args.port, reload=False)
+
+
+if __name__ == "__main__":
+    run_cli()
