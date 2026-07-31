@@ -1,4 +1,5 @@
 import json
+import logging
 
 import main
 
@@ -20,6 +21,10 @@ canaries = {
     "ipv6_query": "ipv6-query-secret-canary",
     "bearer_comma": "bearer-comma-suffix-secret-canary",
     "bearer_semicolon": "bearer-semicolon-suffix-secret-canary",
+    "token_delimiter": "token-delimiter-suffix-secret-canary",
+    "assignment_comma": "assignment-comma-suffix-secret-canary",
+    "assignment_semicolon": "assignment-semicolon-suffix-secret-canary",
+    "malformed_url": "malformed-url-secret-canary",
     "whitespace_password": "whitespace-password-secret-canary",
     "whitespace_secret": "whitespace-secret-secret-canary",
     "whitespace_credential": "whitespace-credential-secret-canary",
@@ -30,6 +35,7 @@ canaries = {
     "long": "long-text-secret-canary",
     "exception": "exception-secret-canary",
     "stack": "stack-secret-canary",
+    "stack_text": "stack-text-secret-canary",
     "fail_closed": "fail-closed-secret-canary",
 }
 
@@ -140,6 +146,19 @@ main.logger.error(
     canaries["bearer_comma"],
     canaries["bearer_semicolon"],
 )
+main.logger.error(
+    "token-safe-marker Authorization: Token prefix,%s",
+    canaries["token_delimiter"],
+)
+main.logger.error(
+    "assignment-safe-marker password=prefix,%s;%s",
+    canaries["assignment_comma"],
+    canaries["assignment_semicolon"],
+)
+main.logger.error(
+    "malformed-url-safe-marker https://user:%s",
+    canaries["malformed_url"],
+)
 main.logger.info(
     "ordinary-marker-one Using password %s",
     canaries["whitespace_password"],
@@ -200,6 +219,21 @@ main.logger.error(
     canaries["stack"],
     stack_info=True,
 )
+
+stack_record = logging.LogRecord(
+    "RAGZ",
+    logging.ERROR,
+    "python_log_sanitizer_check.py",
+    1,
+    "stack-record-safe-marker",
+    (),
+    None,
+)
+stack_record.stack_info = (
+    f"password={canaries['stack_text']} stack-detail-safe-marker"
+)
+main._sensitive_log_filter.filter(stack_record)
+print(logging.Formatter("%(message)s").format(stack_record))
 
 
 class BrokenLogValue:
