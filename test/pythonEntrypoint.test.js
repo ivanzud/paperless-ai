@@ -262,9 +262,19 @@ test('Python logger filter covers root and future third-party handlers', () => {
     'preexisting-override-extra-secret-canary',
     'future-override-message-secret-canary',
     'future-override-extra-secret-canary',
+    'preexisting-override-filter-message-secret-canary',
+    'preexisting-override-filter-extra-secret-canary',
+    'future-override-filter-message-secret-canary',
+    'future-override-filter-extra-secret-canary',
     'malformed-key-secret-canary',
     'remote-process-secret-canary',
     'remote-thread-secret-canary',
+    'core-process-bytes-secret-canary',
+    'core-thread-map-secret-canary',
+    'core-line-list-secret-canary',
+    'core-created-object-secret-canary',
+    'core-level-secret-canary',
+    'reload-hook-secret-canary',
     '123456'
   ];
   const result = runProjectPython([
@@ -286,8 +296,16 @@ test('Python logger filter covers root and future third-party handlers', () => {
   assert.match(output, /direct-record-nested-safe-marker/);
   assert.match(output, /preexisting-override-safe-marker/);
   assert.match(output, /future-override-safe-marker/);
+  assert.match(output, /preexisting-override-filter-safe-marker/);
+  assert.match(output, /future-override-filter-safe-marker/);
   assert.match(output, /remote-core-safe-marker/);
+  assert.match(
+    output,
+    /opaque-core-safe-marker process=0 thread=0 line=0 created=0\.0/
+  );
+  assert.match(output, /malformed-level-safe-marker level=0/);
   assert.match(output, /numeric-sensitive-safe-marker key=0/);
+  assert.match(output, /reload-safe-marker/);
   assert.match(output, /\[log sanitization failed\]/);
   for (const safeNumber of [42, 84, 126, 168, 210]) {
     assert.match(output, new RegExp(`number=${safeNumber}`));
