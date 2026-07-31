@@ -5,6 +5,11 @@
 [![GitHub Stars](https://img.shields.io/github/stars/clusterzx)](https://github.com/clusterzx)
 [![License](https://img.shields.io/github/license/clusterzx/paperless-ai?cacheSeconds=1)](LICENSE)
 
+# ⚠️ IMPORTANT NOTICE:
+This repo is currently not maintained. I appreciate all the efforts from the community pushing PRs and creating issues.
+I'm currently rewriting the entire codebase with a more stable, up-to-date architecture. But I'm limited to evenings, and doing support here while also working on the rewrite just isn't feasible for me.
+With the upcoming official AI integration in Paperless-ngx itself, I'm also not sure if I'll complete the rewrite or continue maintaining this repo at all.
+
 ---
 
 **Paperless-AI** is an AI-powered extension for [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) that brings automatic document classification, smart tagging, and semantic search using OpenAI-compatible APIs and Ollama.
