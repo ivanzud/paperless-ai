@@ -65,7 +65,7 @@ _LOG_SECRET_ASSIGNMENT_PATTERN = re.compile(
     rf"(?<!{_LOG_KEY_CHAR_PATTERN})"
     rf"([\"']?{_LOG_SENSITIVE_KEY_PATTERN}"
     rf"(?!{_LOG_KEY_CHAR_PATTERN})[\"']?\s*[=:]\s*)"
-    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;}]+)",
+    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\S+)",
     re.IGNORECASE,
 )
 _LOG_SECRET_WHITESPACE_PATTERN = re.compile(

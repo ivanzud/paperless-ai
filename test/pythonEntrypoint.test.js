@@ -101,6 +101,10 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'ipv6-query-secret-canary',
     'bearer-comma-suffix-secret-canary',
     'bearer-semicolon-suffix-secret-canary',
+    'token-delimiter-suffix-secret-canary',
+    'assignment-comma-suffix-secret-canary',
+    'assignment-semicolon-suffix-secret-canary',
+    'malformed-url-secret-canary',
     'whitespace-password-secret-canary',
     'whitespace-secret-secret-canary',
     'whitespace-credential-secret-canary',
@@ -111,6 +115,7 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'long-text-secret-canary',
     'exception-secret-canary',
     'stack-secret-canary',
+    'stack-text-secret-canary',
     'fail-closed-secret-canary'
   ];
   const safeMarkers = [
@@ -128,6 +133,9 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'url-delimiter-safe-marker',
     'ipv6-safe-marker',
     'bearer-safe-marker',
+    'token-safe-marker',
+    'assignment-safe-marker',
+    'malformed-url-safe-marker',
     'ordinary-marker-one',
     'ordinary-marker-two',
     'ordinary-marker-three',
@@ -138,7 +146,9 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'long-text-safe-marker',
     'exception-log-safe-marker',
     'exception-detail-safe-marker',
-    'stack-safe-marker'
+    'stack-safe-marker',
+    'stack-record-safe-marker',
+    'stack-detail-safe-marker'
   ];
   const result = runProjectPython([
     path.join(__dirname, 'python_log_sanitizer_check.py')
@@ -150,6 +160,7 @@ test('Python logs recursively redact structured and serialized secrets', () => {
   assert.match(output, /\[REDACTED\]/);
   assert.match(output, /\[TRUNCATED\]/);
   assert.match(output, /\[log sanitization failed\]/);
+  assert.match(output, /\[invalid endpoint\]/);
   assert.match(output, /http:\/\/\[2001:db8::1\]:8443/);
   for (const canary of secretCanaries) {
     assert.equal(output.includes(canary), false, `Python log exposed ${canary}`);
