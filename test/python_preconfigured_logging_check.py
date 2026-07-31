@@ -22,11 +22,41 @@ extra_formatter = logging.Formatter(
     defaults=extra_defaults,
 )
 preconfigured_handler.setFormatter(extra_formatter)
+
+
+class PreexistingOverrideHandler(logging.Handler):
+    def __init__(self, stream):
+        super().__init__()
+        self.stream = stream
+
+    def handle(self, record):
+        self.stream.write(
+            f"{record.getMessage()} | override={record.override_extra}\n"
+        )
+        return True
+
+
+preexisting_override_output = io.StringIO()
+preexisting_override_handler = PreexistingOverrideHandler(
+    preexisting_override_output
+)
 root_logger = logging.getLogger()
 root_logger.handlers[:] = [preconfigured_handler]
 root_logger.setLevel(logging.INFO)
 
 import main
+
+
+class FutureOverrideHandler(logging.Handler):
+    def __init__(self, stream):
+        super().__init__()
+        self.stream = stream
+
+    def handle(self, record):
+        self.stream.write(
+            f"{record.getMessage()} | override={record.override_extra}\n"
+        )
+        return True
 
 
 secret = "preconfigured-root-secret-canary"
@@ -196,6 +226,100 @@ fail_closed_record.safe_ratio = 0.75
 fail_closed_record.safe_enabled = True
 fail_closed_handler.handle(fail_closed_record)
 
+override_logger = logging.getLogger("override-handler")
+override_logger.handlers[:] = [preexisting_override_handler]
+override_logger.propagate = False
+override_logger.setLevel(logging.INFO)
+override_logger.info(
+    "preexisting-override-safe-marker password=%s",
+    "preexisting-override-message-secret-canary",
+    extra={
+        "override_extra": (
+            "postgresql://user:preexisting-override-extra-secret-canary"
+            "@db.example/app"
+        )
+    },
+)
+
+future_override_output = io.StringIO()
+future_override_handler = FutureOverrideHandler(future_override_output)
+future_override_record = logging.LogRecord(
+    "future-override-handler",
+    logging.ERROR,
+    "python_preconfigured_logging_check.py",
+    1,
+    "future-override-safe-marker password=future-override-message-secret-canary",
+    (),
+    None,
+)
+future_override_record.override_extra = (
+    "redis://:future-override-extra-secret-canary@cache.example/0"
+)
+future_override_handler.handle(future_override_record)
+
+
+class BrokenExtraKey:
+    def __hash__(self):
+        return 31_337
+
+    def __str__(self):
+        raise RuntimeError("intentional extra key conversion failure")
+
+
+malformed_key_output = io.StringIO()
+malformed_key_handler = logging.StreamHandler(malformed_key_output)
+malformed_key_handler.setFormatter(logging.Formatter("%(message)s"))
+malformed_key_record = logging.LogRecord(
+    "malformed-extra-key",
+    logging.ERROR,
+    "python_preconfigured_logging_check.py",
+    1,
+    "malformed-key-safe-marker",
+    (),
+    None,
+)
+malformed_key_record.__dict__[BrokenExtraKey()] = (
+    "malformed-key-secret-canary"
+)
+malformed_key_handler.handle(malformed_key_record)
+
+remote_core_output = io.StringIO()
+remote_core_handler = logging.StreamHandler(remote_core_output)
+remote_core_handler.setFormatter(
+    logging.Formatter("%(message)s process=%(process)s thread=%(thread)s")
+)
+remote_core_record = logging.makeLogRecord(
+    {
+        "name": "remote-core-fields",
+        "levelno": logging.ERROR,
+        "levelname": "ERROR",
+        "msg": "remote-core-safe-marker",
+        "args": (),
+        "process": "password=remote-process-secret-canary",
+        "thread": (
+            "postgresql://user:remote-thread-secret-canary@db.example/app"
+        ),
+    }
+)
+remote_core_handler.handle(remote_core_record)
+
+numeric_sensitive_output = io.StringIO()
+numeric_sensitive_handler = logging.StreamHandler(numeric_sensitive_output)
+numeric_sensitive_handler.setFormatter(
+    logging.Formatter("%(message)s key=%(apiKey)d")
+)
+numeric_sensitive_record = logging.LogRecord(
+    "numeric-sensitive-extra",
+    logging.ERROR,
+    "python_preconfigured_logging_check.py",
+    1,
+    "numeric-sensitive-safe-marker",
+    (),
+    None,
+)
+numeric_sensitive_record.apiKey = 123456
+numeric_sensitive_handler.handle(numeric_sensitive_record)
+
 access_output = io.StringIO()
 access_handler = logging.StreamHandler(access_output)
 access_handler.setFormatter(
@@ -228,6 +352,11 @@ output = (
     + late_output.getvalue()
     + record_output.getvalue()
     + fail_closed_output.getvalue()
+    + preexisting_override_output.getvalue()
+    + future_override_output.getvalue()
+    + malformed_key_output.getvalue()
+    + remote_core_output.getvalue()
+    + numeric_sensitive_output.getvalue()
     + access_output.getvalue()
 )
 assert secret not in output
@@ -252,6 +381,14 @@ for extra_secret in (
     "direct-record-url-secret-canary",
     "direct-record-nested-secret-canary",
     "fail-closed-extra-secret-canary",
+    "preexisting-override-message-secret-canary",
+    "preexisting-override-extra-secret-canary",
+    "future-override-message-secret-canary",
+    "future-override-extra-secret-canary",
+    "malformed-key-secret-canary",
+    "remote-process-secret-canary",
+    "remote-thread-secret-canary",
+    "123456",
 ):
     assert extra_secret not in output
 assert "preconfigured-safe-marker" in output
@@ -265,7 +402,12 @@ assert "make-record-safe-marker" in output
 assert "make-record-nested-safe-marker" in output
 assert "direct-record-safe-marker" in output
 assert "direct-record-nested-safe-marker" in output
+assert "preexisting-override-safe-marker" in output
+assert "future-override-safe-marker" in output
+assert "remote-core-safe-marker" in output
+assert "numeric-sensitive-safe-marker key=0" in output
 assert "[log sanitization failed]" in output
+assert "[log sanitization failed]" in malformed_key_output.getvalue()
 for safe_number in ("42", "84", "126", "168", "210"):
     assert f"number={safe_number}" in output
 assert "ratio=0.75 enabled=True" in output
