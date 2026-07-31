@@ -102,9 +102,21 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'bearer-comma-suffix-secret-canary',
     'bearer-semicolon-suffix-secret-canary',
     'token-delimiter-suffix-secret-canary',
+    'basic-auth-secret-canary',
+    'proxy-auth-secret-canary',
+    'digest-auth-secret-canary',
+    'aws4-auth-secret-canary',
+    'cookie-first-secret-canary',
+    'cookie-second-secret-canary',
     'assignment-comma-suffix-secret-canary',
     'assignment-semicolon-suffix-secret-canary',
     'malformed-url-secret-canary',
+    'postgres-uri-secret-canary',
+    'mysql-uri-secret-canary',
+    'redis-uri-secret-canary',
+    'amqp-uri-secret-canary',
+    'encoded-key-secret-canary',
+    'idempotent-secret-canary',
     'whitespace-password-secret-canary',
     'whitespace-secret-secret-canary',
     'whitespace-credential-secret-canary',
@@ -134,8 +146,21 @@ test('Python logs recursively redact structured and serialized secrets', () => {
     'ipv6-safe-marker',
     'bearer-safe-marker',
     'token-safe-marker',
+    'basic-auth-safe-marker',
+    'proxy-auth-safe-marker',
+    'digest-auth-safe-marker',
+    'aws4-auth-safe-marker',
+    'cookie-safe-marker',
     'assignment-safe-marker',
     'malformed-url-safe-marker',
+    'postgres-uri-safe-marker',
+    'mysql-uri-safe-marker',
+    'redis-uri-safe-marker',
+    'amqp-uri-safe-marker',
+    'encoded-key-safe-marker',
+    'encoded-json-safe-marker',
+    'idempotent-pass-safe-marker',
+    'idempotent-safe-marker',
     'ordinary-marker-one',
     'ordinary-marker-two',
     'ordinary-marker-three',
@@ -162,6 +187,13 @@ test('Python logs recursively redact structured and serialized secrets', () => {
   assert.match(output, /\[log sanitization failed\]/);
   assert.match(output, /\[invalid endpoint\]/);
   assert.match(output, /http:\/\/\[2001:db8::1\]:8443/);
+  assert.match(output, /postgresql:\/\/db\.example/);
+  assert.match(output, /mysql:\/\/db\.example/);
+  assert.match(output, /redis:\/\/cache\.example/);
+  assert.match(output, /amqp:\/\/mq\.example/);
+  assert.match(output, /safe-state-marker PAPERLESS_API_TOKEN: \[NOT SET\]/);
+  assert.match(output, /safe-set-marker PAPERLESS_API_TOKEN: \[SET\]/);
+  assert.match(output, /safe-prose-marker password policy remains enforced/);
   for (const canary of secretCanaries) {
     assert.equal(output.includes(canary), false, `Python log exposed ${canary}`);
   }
@@ -175,7 +207,24 @@ test('Python logger filter covers root and future third-party handlers', () => {
     'preconfigured-root-secret-canary',
     'hf-signature-secret-canary',
     'late-handler-secret-canary',
-    'uvicorn-access-secret-canary'
+    'uvicorn-access-secret-canary',
+    'preconfigured-extra-secret-canary',
+    'preconfigured-extra-url-canary',
+    'preconfigured-nested-secret-canary',
+    'preconfigured-cycle-secret-canary',
+    'late-filter-extra-secret-canary',
+    'late-filter-url-secret-canary',
+    'late-filter-nested-secret-canary',
+    'make-record-message-secret-canary',
+    'make-record-extra-secret-canary',
+    'make-record-url-secret-canary',
+    'make-record-path-secret-canary',
+    'make-record-nested-secret-canary',
+    'direct-record-message-secret-canary',
+    'direct-record-extra-secret-canary',
+    'direct-record-url-secret-canary',
+    'direct-record-nested-secret-canary',
+    'fail-closed-extra-secret-canary'
   ];
   const result = runProjectPython([
     path.join(__dirname, 'python_preconfigured_logging_check.py')
@@ -187,6 +236,17 @@ test('Python logger filter covers root and future third-party handlers', () => {
   assert.match(output, /preconfigured-safe-marker/);
   assert.match(output, /third-party-httpx-safe-marker/);
   assert.match(output, /late-handler-safe-marker/);
+  assert.match(output, /preconfigured-extra-safe-marker/);
+  assert.match(output, /preconfigured-nested-safe-marker/);
+  assert.match(output, /late-filter-nested-safe-marker/);
+  assert.match(output, /make-record-safe-marker/);
+  assert.match(output, /make-record-nested-safe-marker/);
+  assert.match(output, /direct-record-safe-marker/);
+  assert.match(output, /direct-record-nested-safe-marker/);
+  assert.match(output, /\[log sanitization failed\]/);
+  for (const safeNumber of [42, 84, 126, 168]) {
+    assert.match(output, new RegExp(`number=${safeNumber}`));
+  }
   assert.match(output, /GET \/private HTTP\/1\.1/);
   assert.match(output, /\[REDACTED\]/);
   assert.doesNotMatch(result.stderr, /--- Logging error ---/);
