@@ -22,9 +22,21 @@ canaries = {
     "bearer_comma": "bearer-comma-suffix-secret-canary",
     "bearer_semicolon": "bearer-semicolon-suffix-secret-canary",
     "token_delimiter": "token-delimiter-suffix-secret-canary",
+    "basic_auth": "basic-auth-secret-canary",
+    "proxy_auth": "proxy-auth-secret-canary",
+    "digest_auth": "digest-auth-secret-canary",
+    "aws4_auth": "aws4-auth-secret-canary",
+    "cookie_first": "cookie-first-secret-canary",
+    "cookie_second": "cookie-second-secret-canary",
     "assignment_comma": "assignment-comma-suffix-secret-canary",
     "assignment_semicolon": "assignment-semicolon-suffix-secret-canary",
     "malformed_url": "malformed-url-secret-canary",
+    "postgres_uri": "postgres-uri-secret-canary",
+    "mysql_uri": "mysql-uri-secret-canary",
+    "redis_uri": "redis-uri-secret-canary",
+    "amqp_uri": "amqp-uri-secret-canary",
+    "encoded_key": "encoded-key-secret-canary",
+    "idempotent": "idempotent-secret-canary",
     "whitespace_password": "whitespace-password-secret-canary",
     "whitespace_secret": "whitespace-secret-secret-canary",
     "whitespace_credential": "whitespace-credential-secret-canary",
@@ -151,6 +163,28 @@ main.logger.error(
     canaries["token_delimiter"],
 )
 main.logger.error(
+    "basic-auth-safe-marker Authorization: Basic %s",
+    canaries["basic_auth"],
+)
+main.logger.error(
+    "proxy-auth-safe-marker Proxy-Authorization: Basic %s",
+    canaries["proxy_auth"],
+)
+main.logger.error(
+    'digest-auth-safe-marker Authorization: Digest username="user", response="%s"',
+    canaries["digest_auth"],
+)
+main.logger.error(
+    "aws4-auth-safe-marker Authorization header "
+    "AWS4-HMAC-SHA256 Credential=test, Signature=%s",
+    canaries["aws4_auth"],
+)
+main.logger.error(
+    "cookie-safe-marker Cookie: first=%s; second=%s",
+    canaries["cookie_first"],
+    canaries["cookie_second"],
+)
+main.logger.error(
     "assignment-safe-marker password=prefix,%s;%s",
     canaries["assignment_comma"],
     canaries["assignment_semicolon"],
@@ -158,6 +192,28 @@ main.logger.error(
 main.logger.error(
     "malformed-url-safe-marker https://user:%s",
     canaries["malformed_url"],
+)
+main.logger.error(
+    "postgres-uri-safe-marker postgresql://user:%s@db.example/app",
+    canaries["postgres_uri"],
+)
+main.logger.error(
+    "mysql-uri-safe-marker mysql://user:%s@db.example/app",
+    canaries["mysql_uri"],
+)
+main.logger.error(
+    "redis-uri-safe-marker redis://:%s@cache.example/0",
+    canaries["redis_uri"],
+)
+main.logger.error(
+    "amqp-uri-safe-marker amqp://user:%s@mq.example/vhost",
+    canaries["amqp_uri"],
+)
+main.logger.error(
+    "encoded-key-safe-marker "
+    + r'{"pass\u0077ord": "'
+    + canaries["encoded_key"]
+    + r'", "safeField": "encoded-json-safe-marker"}'
 )
 main.logger.info(
     "ordinary-marker-one Using password %s",
@@ -175,6 +231,19 @@ main.logger.info(
     "ordinary-marker-four Authorization %s",
     canaries["whitespace_authorization"],
 )
+main.logger.info("safe-state-marker PAPERLESS_API_TOKEN: [NOT SET]")
+main.logger.info("safe-set-marker PAPERLESS_API_TOKEN: [SET]")
+main.logger.info("safe-prose-marker password policy remains enforced")
+
+idempotent_input = (
+    'Idempotent payload: {"password": "'
+    + canaries["idempotent"]
+    + '", "safeField": "idempotent-safe-marker"}'
+)
+idempotent_once = main._sanitize_log_text(idempotent_input)
+idempotent_twice = main._sanitize_log_text(idempotent_once)
+assert idempotent_once == idempotent_twice
+main.logger.info("idempotent-pass-safe-marker %s", idempotent_twice)
 
 cyclic_value = {
     "serviceToken": canaries["cycle"],
