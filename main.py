@@ -487,6 +487,32 @@ def _sanitize_log_text(value: Any, depth: int = 0) -> str:
 _LOG_RECORD_CORE_FIELDS = frozenset(
     logging.LogRecord("", 0, "", 0, "", (), None).__dict__
 ) | {"asctime", "message"}
+_LOG_RECORD_NUMERIC_DEFAULTS = {
+    "levelno": 0,
+    "lineno": 0,
+    "created": 0.0,
+    "msecs": 0.0,
+    "relativeCreated": 0.0,
+    "thread": 0,
+    "process": 0,
+}
+_LOG_RECORD_TEXT_FIELDS = frozenset(
+    {
+        "name",
+        "levelname",
+        "pathname",
+        "filename",
+        "module",
+        "funcName",
+        "threadName",
+        "processName",
+        "taskName",
+        "message",
+        "asctime",
+        "exc_text",
+        "stack_info",
+    }
+)
 
 
 def _sanitize_log_record_extras(record: logging.LogRecord) -> None:
@@ -502,14 +528,21 @@ def _sanitize_log_record_extras(record: logging.LogRecord) -> None:
         )
 
 
-def _sanitize_log_record_text_fields(record: logging.LogRecord) -> None:
+def _sanitize_log_record_core_fields(record: logging.LogRecord) -> None:
     for field, value in list(record.__dict__.items()):
-        if (
-            type(field) is str
-            and field in _LOG_RECORD_CORE_FIELDS
-            and isinstance(value, str)
-        ):
-            record.__dict__[field] = _sanitize_log_text(value)
+        if type(field) is not str or field not in _LOG_RECORD_CORE_FIELDS:
+            continue
+        if field in _LOG_RECORD_NUMERIC_DEFAULTS:
+            default = _LOG_RECORD_NUMERIC_DEFAULTS[field]
+            if type(value) is not type(default):
+                record.__dict__[field] = default
+        elif field in _LOG_RECORD_TEXT_FIELDS and value is not None:
+            sanitized = _redact_log_value(value)
+            record.__dict__[field] = (
+                sanitized
+                if isinstance(sanitized, str)
+                else _sanitize_log_text(sanitized)
+            )
 
 
 def _replace_log_record_with_safe_fallback(
@@ -588,7 +621,7 @@ class _SensitiveLogFilter(logging.Filter):
                 record.exc_text = _sanitize_log_text(record.exc_text)
             if record.stack_info:
                 record.stack_info = _sanitize_log_text(record.stack_info)
-            _sanitize_log_record_text_fields(record)
+            _sanitize_log_record_core_fields(record)
             _sanitize_log_record_extras(record)
         except Exception:
             _replace_log_record_with_safe_fallback(record)
@@ -625,6 +658,38 @@ _sanitizing_handler_handle._paperless_ai_sanitizing_handle = True
 logging.Handler.handle = _sanitizing_handler_handle
 
 
+def _wrap_handler_filter(handler: logging.Handler) -> None:
+    try:
+        current_filter = handler.filter
+    except Exception:
+        return
+    filter_function = getattr(current_filter, "__func__", current_filter)
+    if getattr(
+        filter_function,
+        "_paperless_ai_sanitizing_filter",
+        False,
+    ):
+        return
+
+    def sanitized_filter(record):
+        filtered_record = current_filter(record)
+        target_record = (
+            filtered_record
+            if isinstance(filtered_record, logging.LogRecord)
+            else record
+        )
+        _sensitive_log_filter.filter(record)
+        if target_record is not record:
+            _sensitive_log_filter.filter(target_record)
+        return filtered_record
+
+    sanitized_filter._paperless_ai_sanitizing_filter = True
+    try:
+        handler.filter = sanitized_filter
+    except (AttributeError, TypeError):
+        pass
+
+
 def _wrap_overridden_handler(handler: logging.Handler) -> None:
     try:
         current_handle = handler.handle
@@ -649,32 +714,58 @@ def _wrap_overridden_handler(handler: logging.Handler) -> None:
         pass
 
 
-_previous_handler_init = logging.Handler.__init__
+_current_handler_init = logging.Handler.__init__
+_original_handler_init = getattr(
+    _current_handler_init,
+    "_paperless_ai_original_init",
+    _current_handler_init,
+)
 
 
-def _sanitizing_handler_init(self, *args, **kwargs):
-    _previous_handler_init(self, *args, **kwargs)
-    _wrap_overridden_handler(self)
+def _make_sanitizing_handler_init(original_init):
+    def sanitizing_handler_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        _wrap_handler_filter(self)
+        _wrap_overridden_handler(self)
+
+    sanitizing_handler_init._paperless_ai_original_init = original_init
+    return sanitizing_handler_init
 
 
-logging.Handler.__init__ = _sanitizing_handler_init
+logging.Handler.__init__ = _make_sanitizing_handler_init(
+    _original_handler_init
+)
 for _handler_reference in list(getattr(logging, "_handlerList", ())):
     try:
         _existing_handler = _handler_reference()
     except Exception:
         continue
     if _existing_handler is not None:
+        _wrap_handler_filter(_existing_handler)
         _wrap_overridden_handler(_existing_handler)
 
-_previous_logger_call_handlers = logging.Logger.callHandlers
+_current_logger_call_handlers = logging.Logger.callHandlers
+_original_logger_call_handlers = getattr(
+    _current_logger_call_handlers,
+    "_paperless_ai_original_call_handlers",
+    _current_logger_call_handlers,
+)
 
 
-def _sanitizing_logger_call_handlers(self, record):
-    _sensitive_log_filter.filter(record)
-    return _previous_logger_call_handlers(self, record)
+def _make_sanitizing_logger_call_handlers(original_call_handlers):
+    def sanitizing_logger_call_handlers(self, record):
+        _sensitive_log_filter.filter(record)
+        return original_call_handlers(self, record)
+
+    sanitizing_logger_call_handlers._paperless_ai_original_call_handlers = (
+        original_call_handlers
+    )
+    return sanitizing_logger_call_handlers
 
 
-logging.Logger.callHandlers = _sanitizing_logger_call_handlers
+logging.Logger.callHandlers = _make_sanitizing_logger_call_handlers(
+    _original_logger_call_handlers
+)
 logger = logging.getLogger("RAGZ")
 logger.addFilter(_sensitive_log_filter)
 

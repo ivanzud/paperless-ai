@@ -1,3 +1,4 @@
+import importlib
 import io
 import logging
 
@@ -36,9 +37,49 @@ class PreexistingOverrideHandler(logging.Handler):
         return True
 
 
+class OverrideMutationFilter(logging.Filter):
+    def __init__(self, prefix):
+        super().__init__()
+        self.prefix = prefix
+
+    def filter(self, record):
+        record.msg = (
+            f"{self.prefix}-filter-safe-marker "
+            f"password={self.prefix}-filter-message-secret-canary"
+        )
+        record.args = ()
+        record.override_extra = (
+            f"token={self.prefix}-filter-extra-secret-canary"
+        )
+        return True
+
+
+class PreexistingFilteredOverrideHandler(logging.Handler):
+    def __init__(self, stream):
+        super().__init__()
+        self.stream = stream
+
+    def handle(self, record):
+        filtered_record = self.filter(record)
+        if isinstance(filtered_record, logging.LogRecord):
+            record = filtered_record
+        if filtered_record:
+            self.stream.write(
+                f"{record.getMessage()} | override={record.override_extra}\n"
+            )
+        return filtered_record
+
+
 preexisting_override_output = io.StringIO()
 preexisting_override_handler = PreexistingOverrideHandler(
     preexisting_override_output
+)
+preexisting_filtered_override_output = io.StringIO()
+preexisting_filtered_override_handler = PreexistingFilteredOverrideHandler(
+    preexisting_filtered_override_output
+)
+preexisting_filtered_override_handler.addFilter(
+    OverrideMutationFilter("preexisting-override")
 )
 root_logger = logging.getLogger()
 root_logger.handlers[:] = [preconfigured_handler]
@@ -57,6 +98,22 @@ class FutureOverrideHandler(logging.Handler):
             f"{record.getMessage()} | override={record.override_extra}\n"
         )
         return True
+
+
+class FutureFilteredOverrideHandler(logging.Handler):
+    def __init__(self, stream):
+        super().__init__()
+        self.stream = stream
+
+    def handle(self, record):
+        filtered_record = self.filter(record)
+        if isinstance(filtered_record, logging.LogRecord):
+            record = filtered_record
+        if filtered_record:
+            self.stream.write(
+                f"{record.getMessage()} | override={record.override_extra}\n"
+            )
+        return filtered_record
 
 
 secret = "preconfigured-root-secret-canary"
@@ -257,6 +314,40 @@ future_override_record.override_extra = (
 )
 future_override_handler.handle(future_override_record)
 
+preexisting_filtered_logger = logging.getLogger(
+    "preexisting-filtered-override-handler"
+)
+preexisting_filtered_logger.handlers[:] = [
+    preexisting_filtered_override_handler
+]
+preexisting_filtered_logger.propagate = False
+preexisting_filtered_logger.setLevel(logging.INFO)
+preexisting_filtered_logger.info(
+    "preexisting-filtered-input-safe-marker",
+    extra={"override_extra": "preexisting-filtered-input-extra"},
+)
+
+future_filtered_override_output = io.StringIO()
+future_filtered_override_handler = FutureFilteredOverrideHandler(
+    future_filtered_override_output
+)
+future_filtered_override_handler.addFilter(
+    OverrideMutationFilter("future-override")
+)
+future_filtered_override_record = logging.LogRecord(
+    "future-filtered-override-handler",
+    logging.ERROR,
+    "python_preconfigured_logging_check.py",
+    1,
+    "future-filtered-input-safe-marker",
+    (),
+    None,
+)
+future_filtered_override_record.override_extra = (
+    "future-filtered-input-extra"
+)
+future_filtered_override_handler.handle(future_filtered_override_record)
+
 
 class BrokenExtraKey:
     def __hash__(self):
@@ -303,6 +394,56 @@ remote_core_record = logging.makeLogRecord(
 )
 remote_core_handler.handle(remote_core_record)
 
+
+class CoreSecretObject:
+    def __str__(self):
+        return "password=core-created-object-secret-canary"
+
+
+opaque_core_output = io.StringIO()
+opaque_core_handler = logging.StreamHandler(opaque_core_output)
+opaque_core_handler.setFormatter(
+    logging.Formatter(
+        (
+            "%(message)s process=%(process)d thread=%(thread)d "
+            "line=%(lineno)d created=%(created).1f"
+        )
+    )
+)
+opaque_core_record = logging.makeLogRecord(
+    {
+        "name": "opaque-core-fields",
+        "levelno": logging.ERROR,
+        "levelname": "ERROR",
+        "msg": "opaque-core-safe-marker",
+        "args": (),
+        "process": b"password=core-process-bytes-secret-canary",
+        "thread": {"password": "core-thread-map-secret-canary"},
+        "lineno": ["password=core-line-list-secret-canary"],
+        "created": CoreSecretObject(),
+    }
+)
+opaque_core_handler.handle(opaque_core_record)
+
+malformed_level_output = io.StringIO()
+malformed_level_handler = logging.StreamHandler(malformed_level_output)
+malformed_level_handler.setFormatter(
+    logging.Formatter("%(message)s level=%(levelno)d")
+)
+malformed_level_logger = logging.getLogger("malformed-level-record")
+malformed_level_logger.handlers[:] = [malformed_level_handler]
+malformed_level_logger.propagate = False
+malformed_level_record = logging.makeLogRecord(
+    {
+        "name": "malformed-level-record",
+        "levelno": "password=core-level-secret-canary",
+        "levelname": "ERROR",
+        "msg": "malformed-level-safe-marker",
+        "args": (),
+    }
+)
+malformed_level_logger.handle(malformed_level_record)
+
 numeric_sensitive_output = io.StringIO()
 numeric_sensitive_handler = logging.StreamHandler(numeric_sensitive_output)
 numeric_sensitive_handler.setFormatter(
@@ -319,6 +460,20 @@ numeric_sensitive_record = logging.LogRecord(
 )
 numeric_sensitive_record.apiKey = 123456
 numeric_sensitive_handler.handle(numeric_sensitive_record)
+
+main = importlib.reload(main)
+main = importlib.reload(main)
+reload_output = io.StringIO()
+reload_handler = logging.StreamHandler(reload_output)
+reload_handler.setFormatter(logging.Formatter("%(message)s"))
+reload_logger = logging.getLogger("reload-safe-logger")
+reload_logger.handlers[:] = [reload_handler]
+reload_logger.propagate = False
+reload_logger.setLevel(logging.INFO)
+reload_logger.info(
+    "reload-safe-marker password=%s",
+    "reload-hook-secret-canary",
+)
 
 access_output = io.StringIO()
 access_handler = logging.StreamHandler(access_output)
@@ -354,9 +509,14 @@ output = (
     + fail_closed_output.getvalue()
     + preexisting_override_output.getvalue()
     + future_override_output.getvalue()
+    + preexisting_filtered_override_output.getvalue()
+    + future_filtered_override_output.getvalue()
     + malformed_key_output.getvalue()
     + remote_core_output.getvalue()
+    + opaque_core_output.getvalue()
+    + malformed_level_output.getvalue()
     + numeric_sensitive_output.getvalue()
+    + reload_output.getvalue()
     + access_output.getvalue()
 )
 assert secret not in output
@@ -385,9 +545,19 @@ for extra_secret in (
     "preexisting-override-extra-secret-canary",
     "future-override-message-secret-canary",
     "future-override-extra-secret-canary",
+    "preexisting-override-filter-message-secret-canary",
+    "preexisting-override-filter-extra-secret-canary",
+    "future-override-filter-message-secret-canary",
+    "future-override-filter-extra-secret-canary",
     "malformed-key-secret-canary",
     "remote-process-secret-canary",
     "remote-thread-secret-canary",
+    "core-process-bytes-secret-canary",
+    "core-thread-map-secret-canary",
+    "core-line-list-secret-canary",
+    "core-created-object-secret-canary",
+    "core-level-secret-canary",
+    "reload-hook-secret-canary",
     "123456",
 ):
     assert extra_secret not in output
@@ -404,8 +574,16 @@ assert "direct-record-safe-marker" in output
 assert "direct-record-nested-safe-marker" in output
 assert "preexisting-override-safe-marker" in output
 assert "future-override-safe-marker" in output
+assert "preexisting-override-filter-safe-marker" in output
+assert "future-override-filter-safe-marker" in output
 assert "remote-core-safe-marker" in output
+assert (
+    "opaque-core-safe-marker process=0 thread=0 line=0 created=0.0"
+    in output
+)
+assert "malformed-level-safe-marker level=0" in output
 assert "numeric-sensitive-safe-marker key=0" in output
+assert "reload-safe-marker" in output
 assert "[log sanitization failed]" in output
 assert "[log sanitization failed]" in malformed_key_output.getvalue()
 for safe_number in ("42", "84", "126", "168", "210"):
