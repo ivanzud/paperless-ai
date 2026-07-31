@@ -4,6 +4,7 @@ const axios = require('axios');
 const { OpenAI } = require('openai');
 const config = require('../config/config');
 const AzureOpenAI = require('openai').AzureOpenAI;
+const { safeEndpoint, toSafeError } = require('../utils/logSanitizer');
 
 class SetupService {
   constructor() {
@@ -50,7 +51,10 @@ class SetupService {
 
   async validatePaperlessConfig(url, token) {
     try {
-      console.log('Validating Paperless config for:', url + '/api/documents/');
+      console.log('Validating Paperless config:', {
+        endpoint: safeEndpoint(url),
+        resource: 'documents'
+      });
       const response = await axios.get(`${url}/api/documents/`, {
         headers: {
           'Authorization': `Token ${token}`
@@ -66,7 +70,10 @@ class SetupService {
   async validateApiPermissions(url, token) {
     for (const endpoint of ['correspondents', 'tags', 'documents', 'document_types', 'custom_fields', 'users']) {
       try {
-        console.log(`Validating API permissions for ${url}/api/${endpoint}/`);
+        console.log('Validating Paperless API permission:', {
+          endpoint: safeEndpoint(url),
+          resource: endpoint
+        });
         const response = await axios.get(`${url}/api/${endpoint}/`, {
           headers: {
             'Authorization': `Token ${token}`
@@ -113,7 +120,10 @@ class SetupService {
       apiKey: apiKey,
       model: model
     };
-    console.log('Custom AI config:', config);
+    console.log('Validating custom AI config:', {
+      endpoint: safeEndpoint(config.baseURL),
+      model: config.model
+    });
     try {
       const openai = new OpenAI({ 
         apiKey: config.apiKey, 
@@ -125,7 +135,7 @@ class SetupService {
       });
       return completion.choices && completion.choices.length > 0;
     } catch (error) {
-      console.error('Custom AI validation error:', error);
+      console.error('Custom AI validation error:', toSafeError(error));
       if (error?.status === 429 || error?.response?.status === 429) {
         return true;
       }
@@ -159,7 +169,10 @@ class SetupService {
   }
 
   async validateAzureConfig(apiKey, endpoint, deploymentName, apiVersion) {
-    console.log('Endpoint: ', endpoint);
+    console.log('Validating Azure AI config:', {
+      endpoint: safeEndpoint(endpoint),
+      deploymentName
+    });
     if (config.CONFIGURED === false) {
       try {
         const openai = new AzureOpenAI({ apiKey: apiKey,

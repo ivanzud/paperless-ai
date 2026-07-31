@@ -23,6 +23,7 @@ const customService = require('../services/customService.js');
 const metadataNormalizationService = require('../services/metadataNormalizationService');
 const config = require('../config/config.js');
 const { normalizeCustomFieldValueForPaperless } = require('../services/serviceUtils');
+const { redactSensitive, toSafeError } = require('../utils/logSanitizer');
 require('dotenv').config({ path: '../data/.env' });
 
 /**
@@ -2002,9 +2003,9 @@ router.post('/api/key-regenerate', async (req, res) => {
 
     // Sende die Antwort zurück
     res.json({ success: apiKey });
-    console.log('API key regenerated:', apiKey);
+    console.log('API key regenerated');
   } catch (error) {
-    console.error('API key regeneration error:', error);
+    console.error('API key regeneration error:', toSafeError(error));
     res.status(500).json({ error: 'Error regenerating API key' });
   }
 });
@@ -3923,13 +3924,7 @@ router.post('/setup', express.json(), async (req, res) => {
     } = req.body;
 
     // Log setup request with sensitive data redacted
-    const sensitiveKeys = ['paperlessToken', 'openaiKey', 'customApiKey', 'password', 'confirmPassword'];
-    const redactedBody = Object.fromEntries(
-      Object.entries(req.body).map(([key, value]) => [
-      key,
-      sensitiveKeys.includes(key) ? '******' : value
-      ])
-    );
+    const redactedBody = redactSensitive(req.body);
     console.log('Setup request received:', redactedBody);
 
 
@@ -3993,7 +3988,10 @@ router.post('/setup', express.json(), async (req, res) => {
               console.log(`[SUCCESS] Created/found custom field: ${field.value}`);
             }
           } catch (fieldError) {
-            console.error(`[WARNING] Error creating custom field ${field.value}:`, fieldError);
+            console.error(
+              `[WARNING] Error creating custom field ${field.value}:`,
+              toSafeError(fieldError)
+            );
           }
         }
       } catch (error) {
@@ -4112,7 +4110,7 @@ router.post('/setup', express.json(), async (req, res) => {
     }, 5000);
 
   } catch (error) {
-    console.error('[ERROR] Setup error:', error);
+    console.error('[ERROR] Setup error:', toSafeError(error));
     res.status(500).json({ 
       error: 'An error occurred: ' + error.message
     });
@@ -4427,7 +4425,7 @@ router.post('/settings', express.json(), async (req, res) => {
         await paperlessService.createCustomFieldSafely(field.value, field.data_type, field.currency);
       }
     } catch (error) {
-      console.log('[ERROR] Error creating custom fields:', error);
+      console.error('[ERROR] Error creating custom fields:', toSafeError(error));
     }
 
     const normalizeArray = (value) => {
@@ -4591,7 +4589,7 @@ router.post('/settings', express.json(), async (req, res) => {
     }, 5000);
 
   } catch (error) {
-    console.error('Settings update error:', error);
+    console.error('Settings update error:', toSafeError(error));
     res.status(500).json({ 
       error: 'An error occurred: ' + error.message
     });
