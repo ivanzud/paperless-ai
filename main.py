@@ -220,15 +220,30 @@ class _SensitiveLogFilter(logging.Filter):
             return True
 
         try:
-            if not isinstance(record.msg, str) or not record.args:
-                record.msg = _redact_log_value(record.msg)
-            record.args = _redact_log_value(record.args)
-            try:
-                message = record.getMessage()
-            except (KeyError, TypeError, ValueError):
-                message = f"{record.msg} [logging arguments omitted]"
-            record.msg = _sanitize_log_fragments(message)
-            record.args = ()
+            is_uvicorn_access_record = (
+                record.name == "uvicorn.access"
+                and isinstance(record.args, tuple)
+                and len(record.args) == 5
+            )
+            if is_uvicorn_access_record:
+                sanitized_args = [
+                    _redact_log_value(item)
+                    for item in record.args
+                ]
+                request_target = str(record.args[2]).split("?", 1)[0].split("#", 1)[0]
+                sanitized_args[2] = _sanitize_log_text(request_target)
+                record.msg = _sanitize_log_text(record.msg)
+                record.args = tuple(sanitized_args)
+            else:
+                if not isinstance(record.msg, str) or not record.args:
+                    record.msg = _redact_log_value(record.msg)
+                record.args = _redact_log_value(record.args)
+                try:
+                    message = record.getMessage()
+                except (KeyError, TypeError, ValueError):
+                    message = f"{record.msg} [logging arguments omitted]"
+                record.msg = _sanitize_log_fragments(message)
+                record.args = ()
 
             if record.exc_info:
                 record.exc_text = _sanitize_log_text(
