@@ -174,7 +174,8 @@ test('Python logger filter covers root and future third-party handlers', () => {
   const secrets = [
     'preconfigured-root-secret-canary',
     'hf-signature-secret-canary',
-    'late-handler-secret-canary'
+    'late-handler-secret-canary',
+    'uvicorn-access-secret-canary'
   ];
   const result = runProjectPython([
     path.join(__dirname, 'python_preconfigured_logging_check.py')
@@ -186,7 +187,10 @@ test('Python logger filter covers root and future third-party handlers', () => {
   assert.match(output, /preconfigured-safe-marker/);
   assert.match(output, /third-party-httpx-safe-marker/);
   assert.match(output, /late-handler-safe-marker/);
+  assert.match(output, /GET \/private HTTP\/1\.1/);
   assert.match(output, /\[REDACTED\]/);
+  assert.doesNotMatch(result.stderr, /--- Logging error ---/);
+  assert.doesNotMatch(result.stderr, /not enough values to unpack/);
   for (const secret of secrets) {
     assert.equal(output.includes(secret), false);
   }
