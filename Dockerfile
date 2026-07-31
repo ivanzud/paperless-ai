@@ -72,12 +72,13 @@ VOLUME ["/app/data"]
 # Configure application port - aber der tatsächliche Port wird durch PAPERLESS_AI_PORT bestimmt
 EXPOSE ${PAPERLESS_AI_PORT:-3000}
 
-# Add health check with dynamic port
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+# Add health check with dynamic port. RAG model downloads may take time on an empty cache.
+HEALTHCHECK --interval=30s --timeout=30s --start-period=2m --retries=3 \
   CMD curl -f http://localhost:${PAPERLESS_AI_PORT:-3000}/health || exit 1
 
 # Set production environment
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+  HF_HUB_DISABLE_XET=1
 
 # Start as root only long enough to prepare the mounted volume, then drop to PUID/PGID.
 ENTRYPOINT ["/usr/local/bin/paperless-ai-entrypoint"]

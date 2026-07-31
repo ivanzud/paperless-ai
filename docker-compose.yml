@@ -1,6 +1,9 @@
 services:
   paperless-ai:
-    image: clusterzx/paperless-ai
+    image: ivanzud/paperless-ai:local
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: paperless-ai
     network_mode: bridge
     restart: unless-stopped
@@ -20,6 +23,7 @@ services:
       - PAPERLESS_AI_PORT=${PAPERLESS_AI_PORT:-3000}
       - RAG_SERVICE_URL=http://localhost:8000
       - RAG_SERVICE_ENABLED=true
+      - HF_HUB_DISABLE_XET=1
     ports:
       - "3000:${PAPERLESS_AI_PORT:-3000}"
     volumes:

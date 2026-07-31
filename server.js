@@ -1,3 +1,6 @@
+const { installSafeConsole, toSafeError } = require('./utils/logSanitizer');
+installSafeConsole();
+
 const express = require('express');
 const cron = require('node-cron');
 const path = require('path');
@@ -8,6 +11,7 @@ const AIServiceFactory = require('./services/aiServiceFactory');
 const metadataNormalizationService = require('./services/metadataNormalizationService');
 const documentModel = require('./models/document');
 const setupService = require('./services/setupService');
+const ragService = require('./services/ragService');
 const setupRoutes = require('./routes/setup');
 const { normalizeCustomFieldValueForPaperless } = require('./services/serviceUtils');
 
@@ -733,12 +737,21 @@ app.get('/health', async (req, res) => {
     }
 
     await documentModel.isDocumentProcessed(1);
-    res.json({ status: 'healthy' });
+
+    const health = { status: 'healthy', rag: 'disabled' };
+    if (process.env.RAG_SERVICE_ENABLED === 'true') {
+      await ragService.checkReadiness();
+      health.rag = 'ready';
+    }
+
+    res.json(health);
   } catch (error) {
-    console.error('Health check failed:', error);
+    console.error('Health check failed:', toSafeError(error));
     res.status(503).json({ 
       status: 'error', 
-      message: error.message 
+      message: error.code === 'RAG_NOT_READY'
+        ? 'RAG service is not ready'
+        : 'Application health check failed'
     });
   }
 });

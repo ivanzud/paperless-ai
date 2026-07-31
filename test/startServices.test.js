@@ -31,7 +31,7 @@ while true; do sleep 0.05; done
 `);
 
   writeExecutable(path.join(binDir, 'fake-pm2'), `#!/usr/bin/env bash
-printf '%s\\n%s\\n' "$RAG_SERVICE_ENABLED" "$RAG_SERVICE_URL" > "$PAPERLESS_AI_APP_DIR/node.marker"
+printf '%s\\n%s\\n%s\\n' "$RAG_SERVICE_ENABLED" "$RAG_SERVICE_URL" "$HF_HUB_DISABLE_XET" > "$PAPERLESS_AI_APP_DIR/node.marker"
 `);
 
   return { appDir, binDir };
@@ -71,14 +71,15 @@ test('RAG_SERVICE_ENABLED=false skips Python and preserves the caller URL', (t) 
   assert.equal(fs.existsSync(path.join(appDir, 'python.marker')), false);
   assert.equal(
     fs.readFileSync(path.join(appDir, 'node.marker'), 'utf8'),
-    'false\nhttp://rag.example.test:9000\n'
+    'false\nhttp://rag.example.test:9000\n1\n'
   );
 });
 
 test('RAG defaults to enabled and starts Python with the local URL', (t) => {
   const { appDir, result } = runStartup({
     RAG_SERVICE_ENABLED: '',
-    RAG_SERVICE_URL: ''
+    RAG_SERVICE_URL: '',
+    HF_HUB_DISABLE_XET: ''
   });
   t.after(() => fs.rmSync(appDir, { recursive: true, force: true }));
 
@@ -86,7 +87,7 @@ test('RAG defaults to enabled and starts Python with the local URL', (t) => {
   assert.equal(fs.readFileSync(path.join(appDir, 'python.marker'), 'utf8'), 'started\n');
   assert.equal(
     fs.readFileSync(path.join(appDir, 'node.marker'), 'utf8'),
-    'true\nhttp://localhost:8000\n'
+    'true\nhttp://localhost:8000\n1\n'
   );
 });
 

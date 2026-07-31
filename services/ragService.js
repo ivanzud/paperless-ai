@@ -129,6 +129,28 @@ class RagService {
   }
 
   /**
+   * Check whether RAG can serve the context endpoint.
+   * @returns {Promise<{status: string, ready: boolean, checks: Object}>}
+   */
+  async checkReadiness() {
+    const timeoutMs = this.parseTimeoutMs(process.env.RAG_READINESS_TIMEOUT_MS, 5000);
+    try {
+      const response = await axios.get(`${this.baseUrl}/ready`, { timeout: timeoutMs });
+      if (!response.data?.ready) {
+        const error = new Error('RAG service is not ready');
+        error.code = 'RAG_NOT_READY';
+        throw error;
+      }
+      return response.data;
+    } catch (error) {
+      const readinessError = new Error('RAG service is not ready');
+      readinessError.code = 'RAG_NOT_READY';
+      readinessError.status = error.response?.status;
+      throw readinessError;
+    }
+  }
+
+  /**
    * Search for documents matching a query
    * @param {string} query - The search query
    * @param {Object} filters - Optional filters for search

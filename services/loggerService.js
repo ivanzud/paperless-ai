@@ -1,6 +1,7 @@
 const fs = require('fs');
 const util = require('util');
 const path = require('path');
+const { sanitizeLogArguments } = require('../utils/logSanitizer');
 
 class Logger {
     constructor(options = {}) {
@@ -144,7 +145,7 @@ class Logger {
     }
 
     formatLogMessage(type, args) {
-        const msg = util.format(...args);
+        const msg = util.format(...sanitizeLogArguments(args));
         if (this.format === 'html') {
             const timestamp = this.timestamp ? 
                 `<span class="timestamp">[${this.getTimestamp()}]</span>` : '';
@@ -188,32 +189,37 @@ class Logger {
 
     overrideConsoleMethods() {
         console.log = (...args) => {
-            const logMessage = this.formatLogMessage('info', args);
-            this.originalConsole.log(...args);
+            const safeArgs = sanitizeLogArguments(args);
+            const logMessage = this.formatLogMessage('info', safeArgs);
+            this.originalConsole.log(...safeArgs);
             this.writeToFile(logMessage);
         };
 
         console.error = (...args) => {
-            const logMessage = this.formatLogMessage('error', args);
-            this.originalConsole.error(...args);
+            const safeArgs = sanitizeLogArguments(args);
+            const logMessage = this.formatLogMessage('error', safeArgs);
+            this.originalConsole.error(...safeArgs);
             this.writeToFile(logMessage);
         };
 
         console.warn = (...args) => {
-            const logMessage = this.formatLogMessage('warn', args);
-            this.originalConsole.warn(...args);
+            const safeArgs = sanitizeLogArguments(args);
+            const logMessage = this.formatLogMessage('warn', safeArgs);
+            this.originalConsole.warn(...safeArgs);
             this.writeToFile(logMessage);
         };
 
         console.info = (...args) => {
-            const logMessage = this.formatLogMessage('info', args);
-            this.originalConsole.info(...args);
+            const safeArgs = sanitizeLogArguments(args);
+            const logMessage = this.formatLogMessage('info', safeArgs);
+            this.originalConsole.info(...safeArgs);
             this.writeToFile(logMessage);
         };
 
         console.debug = (...args) => {
-            const logMessage = this.formatLogMessage('debug', args);
-            this.originalConsole.debug(...args);
+            const safeArgs = sanitizeLogArguments(args);
+            const logMessage = this.formatLogMessage('debug', safeArgs);
+            this.originalConsole.debug(...safeArgs);
             this.writeToFile(logMessage);
         };
     }
