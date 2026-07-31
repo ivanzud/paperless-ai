@@ -419,6 +419,12 @@ class _SensitiveLogFilter(logging.Filter):
                     setattr(record, field, _LOG_REDACTED)
             for key in list(record.__dict__):
                 if key not in _LOG_RECORD_CORE_FIELDS:
+                    value = record.__dict__[key]
+                    if (
+                        not _is_sensitive_log_key(key)
+                        and type(value) in (bool, int, float)
+                    ):
+                        continue
                     record.__dict__[key] = _LOG_REDACTED
         return True
 
