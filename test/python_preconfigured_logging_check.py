@@ -348,6 +348,133 @@ future_filtered_override_record.override_extra = (
 )
 future_filtered_override_handler.handle(future_filtered_override_record)
 
+late_assigned_override_output = io.StringIO()
+late_assigned_override_handler = FutureFilteredOverrideHandler(
+    late_assigned_override_output
+)
+late_assigned_override_handler.filter = OverrideMutationFilter(
+    "late-assigned-override"
+).filter
+late_assigned_override_record = logging.LogRecord(
+    "late-assigned-override-handler",
+    logging.ERROR,
+    "python_preconfigured_logging_check.py",
+    1,
+    "late-assigned-input-safe-marker",
+    (),
+    None,
+)
+late_assigned_override_record.override_extra = "late-assigned-input-extra"
+late_assigned_override_handler.handle(late_assigned_override_record)
+
+
+class SuperFilteredOverrideHandler(logging.Handler):
+    def __init__(self, stream):
+        super().__init__()
+        self.stream = stream
+
+    def handle(self, record):
+        filtered_record = super().filter(record)
+        if isinstance(filtered_record, logging.LogRecord):
+            record = filtered_record
+        if filtered_record:
+            self.stream.write(
+                f"{record.getMessage()} | override={record.override_extra}\n"
+            )
+        return filtered_record
+
+
+super_filtered_override_output = io.StringIO()
+super_filtered_override_handler = SuperFilteredOverrideHandler(
+    super_filtered_override_output
+)
+super_filtered_override_handler.addFilter(
+    OverrideMutationFilter("super-filtered-override")
+)
+super_filtered_override_record = logging.LogRecord(
+    "super-filtered-override-handler",
+    logging.ERROR,
+    "python_preconfigured_logging_check.py",
+    1,
+    "super-filtered-input-safe-marker",
+    (),
+    None,
+)
+super_filtered_override_record.override_extra = "super-filtered-input-extra"
+super_filtered_override_handler.handle(super_filtered_override_record)
+
+
+class PostFilterEmitHandler(logging.StreamHandler):
+    def handle(self, record):
+        filtered_record = self.filter(record)
+        if isinstance(filtered_record, logging.LogRecord):
+            record = filtered_record
+        if filtered_record:
+            record.msg = (
+                "post-filter-emit-safe-marker "
+                "password=post-filter-emit-message-secret-canary"
+            )
+            record.args = ()
+            record.secret_extra = "post-filter-emit-extra-secret-canary"
+            self.emit(record)
+        return filtered_record
+
+
+post_filter_emit_output = io.StringIO()
+post_filter_emit_handler = PostFilterEmitHandler(post_filter_emit_output)
+post_filter_emit_handler.setFormatter(
+    logging.Formatter("%(message)s | extra=%(secret_extra)s")
+)
+post_filter_emit_record = logging.LogRecord(
+    "post-filter-emit-handler",
+    logging.ERROR,
+    "python_preconfigured_logging_check.py",
+    1,
+    "post-filter-input-safe-marker",
+    (),
+    None,
+)
+post_filter_emit_record.secret_extra = "post-filter-input-extra"
+post_filter_emit_handler.handle(post_filter_emit_record)
+
+
+class ReplacementRecordFilter(logging.Filter):
+    def filter(self, record):
+        replacement = logging.LogRecord(
+            "replacement-record-handler",
+            logging.ERROR,
+            "python_preconfigured_logging_check.py",
+            1,
+            (
+                "replacement-record-safe-marker "
+                "password=replacement-record-message-secret-canary"
+            ),
+            (),
+            None,
+        )
+        replacement.secret_extra = (
+            "token=replacement-record-extra-secret-canary"
+        )
+        return replacement
+
+
+replacement_record_output = io.StringIO()
+replacement_record_handler = logging.StreamHandler(replacement_record_output)
+replacement_record_handler.setFormatter(
+    logging.Formatter("%(message)s | extra=%(secret_extra)s")
+)
+replacement_record_handler.addFilter(ReplacementRecordFilter())
+replacement_record = logging.LogRecord(
+    "replacement-record-input",
+    logging.ERROR,
+    "python_preconfigured_logging_check.py",
+    1,
+    "replacement-record-input-safe-marker",
+    (),
+    None,
+)
+replacement_record_handler.handle(replacement_record)
+
 
 class BrokenExtraKey:
     def __hash__(self):
@@ -461,9 +588,80 @@ numeric_sensitive_record = logging.LogRecord(
 numeric_sensitive_record.apiKey = 123456
 numeric_sensitive_handler.handle(numeric_sensitive_record)
 
-main = importlib.reload(main)
-main = importlib.reload(main)
+
+class FalseyExceptionInfo:
+    def __bool__(self):
+        return False
+
+    def __str__(self):
+        return "password=falsey-exc-info-secret-canary"
+
+
+falsey_exc_output = io.StringIO()
+falsey_exc_handler = logging.StreamHandler(falsey_exc_output)
+falsey_exc_handler.setFormatter(
+    logging.Formatter("%(message)s exc=%(exc_info)s")
+)
+falsey_exc_record = logging.LogRecord(
+    "falsey-exception-info",
+    logging.ERROR,
+    "python_preconfigured_logging_check.py",
+    1,
+    "falsey-exc-info-safe-marker",
+    (),
+    None,
+)
+falsey_exc_record.exc_info = FalseyExceptionInfo()
+falsey_exc_handler.handle(falsey_exc_record)
+
+extreme_numeric_output = io.StringIO()
+extreme_numeric_handler = logging.StreamHandler(extreme_numeric_output)
+extreme_numeric_handler.setFormatter(
+    logging.Formatter(
+        (
+            "%(message)s level=%(levelno)d process=%(process)d "
+            "thread=%(thread)d line=%(lineno)d created=%(created).1f "
+            "msecs=%(msecs).1f relative=%(relativeCreated).1f "
+            "asctime=%(asctime)s"
+        )
+    )
+)
+extreme_numeric_record = logging.makeLogRecord(
+    {
+        "name": "extreme-numeric-core-fields",
+        "levelno": 10**5_000,
+        "levelname": "ERROR",
+        "msg": "extreme-numeric-safe-marker",
+        "args": (),
+        "process": 10**5_000,
+        "thread": -(10**5_000),
+        "lineno": 10**5_000,
+        "created": float("inf"),
+        "msecs": float("nan"),
+        "relativeCreated": float("-inf"),
+    }
+)
+extreme_numeric_handler.handle(extreme_numeric_record)
+
+for _ in range(6):
+    main = importlib.reload(main)
+root_filter_count = sum(
+    bool(getattr(item, "_paperless_ai_sensitive_filter", False))
+    for item in preconfigured_handler.filters
+)
+logger_filter_count = sum(
+    bool(getattr(item, "_paperless_ai_sensitive_filter", False))
+    for item in main.logger.filters
+)
+assert root_filter_count == 1
+assert logger_filter_count == 1
 reload_output = io.StringIO()
+reload_output.write(
+    (
+        "reload-filter-count-safe-marker "
+        f"root={root_filter_count} logger={logger_filter_count}\n"
+    )
+)
 reload_handler = logging.StreamHandler(reload_output)
 reload_handler.setFormatter(logging.Formatter("%(message)s"))
 reload_logger = logging.getLogger("reload-safe-logger")
@@ -511,11 +709,17 @@ output = (
     + future_override_output.getvalue()
     + preexisting_filtered_override_output.getvalue()
     + future_filtered_override_output.getvalue()
+    + late_assigned_override_output.getvalue()
+    + super_filtered_override_output.getvalue()
+    + post_filter_emit_output.getvalue()
+    + replacement_record_output.getvalue()
     + malformed_key_output.getvalue()
     + remote_core_output.getvalue()
     + opaque_core_output.getvalue()
     + malformed_level_output.getvalue()
     + numeric_sensitive_output.getvalue()
+    + falsey_exc_output.getvalue()
+    + extreme_numeric_output.getvalue()
     + reload_output.getvalue()
     + access_output.getvalue()
 )
@@ -549,6 +753,14 @@ for extra_secret in (
     "preexisting-override-filter-extra-secret-canary",
     "future-override-filter-message-secret-canary",
     "future-override-filter-extra-secret-canary",
+    "late-assigned-override-filter-message-secret-canary",
+    "late-assigned-override-filter-extra-secret-canary",
+    "super-filtered-override-filter-message-secret-canary",
+    "super-filtered-override-filter-extra-secret-canary",
+    "post-filter-emit-message-secret-canary",
+    "post-filter-emit-extra-secret-canary",
+    "replacement-record-message-secret-canary",
+    "replacement-record-extra-secret-canary",
     "malformed-key-secret-canary",
     "remote-process-secret-canary",
     "remote-thread-secret-canary",
@@ -557,6 +769,7 @@ for extra_secret in (
     "core-line-list-secret-canary",
     "core-created-object-secret-canary",
     "core-level-secret-canary",
+    "falsey-exc-info-secret-canary",
     "reload-hook-secret-canary",
     "123456",
 ):
@@ -576,6 +789,10 @@ assert "preexisting-override-safe-marker" in output
 assert "future-override-safe-marker" in output
 assert "preexisting-override-filter-safe-marker" in output
 assert "future-override-filter-safe-marker" in output
+assert "late-assigned-override-filter-safe-marker" in output
+assert "super-filtered-override-filter-safe-marker" in output
+assert "post-filter-emit-safe-marker" in output
+assert "replacement-record-safe-marker" in output
 assert "remote-core-safe-marker" in output
 assert (
     "opaque-core-safe-marker process=0 thread=0 line=0 created=0.0"
@@ -583,6 +800,13 @@ assert (
 )
 assert "malformed-level-safe-marker level=0" in output
 assert "numeric-sensitive-safe-marker key=0" in output
+assert "falsey-exc-info-safe-marker exc=None" in output
+assert (
+    "extreme-numeric-safe-marker level=0 process=0 thread=0 line=0 "
+    "created=0.0 msecs=0.0 relative=0.0"
+    in output
+)
+assert "reload-filter-count-safe-marker root=1 logger=1" in output
 assert "reload-safe-marker" in output
 assert "[log sanitization failed]" in output
 assert "[log sanitization failed]" in malformed_key_output.getvalue()

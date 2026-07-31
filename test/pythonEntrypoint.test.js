@@ -266,6 +266,14 @@ test('Python logger filter covers root and future third-party handlers', () => {
     'preexisting-override-filter-extra-secret-canary',
     'future-override-filter-message-secret-canary',
     'future-override-filter-extra-secret-canary',
+    'late-assigned-override-filter-message-secret-canary',
+    'late-assigned-override-filter-extra-secret-canary',
+    'super-filtered-override-filter-message-secret-canary',
+    'super-filtered-override-filter-extra-secret-canary',
+    'post-filter-emit-message-secret-canary',
+    'post-filter-emit-extra-secret-canary',
+    'replacement-record-message-secret-canary',
+    'replacement-record-extra-secret-canary',
     'malformed-key-secret-canary',
     'remote-process-secret-canary',
     'remote-thread-secret-canary',
@@ -274,6 +282,7 @@ test('Python logger filter covers root and future third-party handlers', () => {
     'core-line-list-secret-canary',
     'core-created-object-secret-canary',
     'core-level-secret-canary',
+    'falsey-exc-info-secret-canary',
     'reload-hook-secret-canary',
     '123456'
   ];
@@ -298,6 +307,10 @@ test('Python logger filter covers root and future third-party handlers', () => {
   assert.match(output, /future-override-safe-marker/);
   assert.match(output, /preexisting-override-filter-safe-marker/);
   assert.match(output, /future-override-filter-safe-marker/);
+  assert.match(output, /late-assigned-override-filter-safe-marker/);
+  assert.match(output, /super-filtered-override-filter-safe-marker/);
+  assert.match(output, /post-filter-emit-safe-marker/);
+  assert.match(output, /replacement-record-safe-marker/);
   assert.match(output, /remote-core-safe-marker/);
   assert.match(
     output,
@@ -305,6 +318,12 @@ test('Python logger filter covers root and future third-party handlers', () => {
   );
   assert.match(output, /malformed-level-safe-marker level=0/);
   assert.match(output, /numeric-sensitive-safe-marker key=0/);
+  assert.match(output, /falsey-exc-info-safe-marker exc=None/);
+  assert.match(
+    output,
+    /extreme-numeric-safe-marker level=0 process=0 thread=0 line=0 created=0\.0 msecs=0\.0 relative=0\.0/
+  );
+  assert.match(output, /reload-filter-count-safe-marker root=1 logger=1/);
   assert.match(output, /reload-safe-marker/);
   assert.match(output, /\[log sanitization failed\]/);
   for (const safeNumber of [42, 84, 126, 168, 210]) {
@@ -314,6 +333,7 @@ test('Python logger filter covers root and future third-party handlers', () => {
   assert.match(output, /\[REDACTED\]/);
   assert.doesNotMatch(result.stderr, /--- Logging error ---/);
   assert.doesNotMatch(result.stderr, /not enough values to unpack/);
+  assert.doesNotMatch(result.stderr, /RecursionError|OverflowError/);
   for (const secret of secrets) {
     assert.equal(output.includes(secret), false);
   }
