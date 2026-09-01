@@ -21,7 +21,9 @@ class PaperlessService {
     this.customFieldCache = new Map();
     this.lastTagRefresh = 0;
     this.lastDocumentTypeRefresh = 0;
-    this.CACHE_LIFETIME = 3000; // 3 Sekunden
+    this.TAG_CACHE_LIFETIME = config.tagCacheLifetime;
+    this.TAG_PAGE_SIZE = config.tagPageSize;
+    this.CACHE_LIFETIME = 3000; // Document type cache lifetime
   }
 
   normalizeBaseUrl(apiUrl) {
@@ -219,7 +221,7 @@ class PaperlessService {
   }
 
 
-  // Aktualisiert den Tag-Cache, wenn er älter als CACHE_LIFETIME ist
+  // Aktualisiert den Tag-Cache, wenn er älter als TAG_CACHE_LIFETIME ist
   async ensureTagCache() {
     this.initialize();
     if (!this.client) {
@@ -227,7 +229,7 @@ class PaperlessService {
     }
 
     const now = Date.now();
-    if (this.tagCache.size === 0 || (now - this.lastTagRefresh) > this.CACHE_LIFETIME) {
+    if (this.tagCache.size === 0 || (now - this.lastTagRefresh) > this.TAG_CACHE_LIFETIME) {
       await this.refreshTagCache();
     }
   }
@@ -239,7 +241,7 @@ class PaperlessService {
         this.tagCache.clear();
         this.tagNormalizedCache.clear();
         this.tagIdCache.clear();
-        let nextUrl = '/tags/';
+        let nextUrl = `/tags/?page_size=${this.TAG_PAGE_SIZE}`;
         while (nextUrl) {
           const response = await this.client.get(nextUrl);
 

@@ -4406,7 +4406,9 @@ router.post('/settings', express.json(), async (req, res) => {
       EXTERNAL_API_HEADERS: process.env.EXTERNAL_API_HEADERS || '{}',
       EXTERNAL_API_BODY: process.env.EXTERNAL_API_BODY || '{}',
       EXTERNAL_API_TIMEOUT: process.env.EXTERNAL_API_TIMEOUT || '5000',
-      EXTERNAL_API_TRANSFORM: process.env.EXTERNAL_API_TRANSFORM || ''
+      EXTERNAL_API_TRANSFORM: process.env.EXTERNAL_API_TRANSFORM || '',
+      TAG_CACHE_LIFETIME: process.env.TAG_CACHE_LIFETIME || '3000',
+      TAG_PAGE_SIZE: process.env.TAG_PAGE_SIZE || '100'
     };
 
     // Process custom fields
