@@ -1183,6 +1183,12 @@ class GlobalState:
 
 global_state = GlobalState()
 
+
+def _get_document_created(document: Mapping[str, Any]) -> Any:
+    """Return the canonical Paperless date with an older-version fallback."""
+    return document.get("created") or document.get("created_date", "")
+
+
 # Data Manager
 class DataManager:
     def __init__(self, initialize_on_start=False):
@@ -1433,7 +1439,7 @@ class DataManager:
                 "title": doc.get("title", ""),
                 "content": content,
                 "correspondent": correspondent,
-                "created": doc.get("created_date", doc.get("created", "")),
+                "created": _get_document_created(doc),
                 "tags": tags,
                 "last_updated": doc.get("modified", "")
             }

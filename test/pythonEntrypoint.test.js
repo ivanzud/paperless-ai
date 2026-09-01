@@ -46,6 +46,14 @@ test('CLI initialization handler is registered on the app passed to Uvicorn', ()
   assert.match(result.stdout, /cli-app-identity-ok/);
 });
 
+test('Python RAG metadata prefers canonical created with legacy fallback', () => {
+  const result = runProjectPython([
+    path.join(__dirname, 'python_created_date_compat_check.py')
+  ]);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /python-created-date-compat-ok/);
+});
+
 test('Python startup logs redact Paperless URL and token canaries', () => {
   const canaries = [
     'url-userinfo-canary',
