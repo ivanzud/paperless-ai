@@ -24,6 +24,10 @@ const metadataNormalizationService = require('../services/metadataNormalizationS
 const config = require('../config/config.js');
 const { normalizeCustomFieldValueForPaperless } = require('../services/serviceUtils');
 const { redactSensitive, toSafeError } = require('../utils/logSanitizer');
+const {
+  saveAnalyzedDocumentChanges,
+  saveManualDocumentChanges
+} = require('../services/documentUpdateService');
 require('dotenv').config({ path: '../data/.env' });
 
 /**
@@ -1602,12 +1606,8 @@ try {
             const { analysis, originalData } = result;
             const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
             await saveDocumentChanges(doc.id, updateData, analysis, originalData);
-            await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
           } catch (error) {
-            console.error(`[ERROR] processing document ${doc.id}:`, error);
-            if (error?.stack) {
-              console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
-            }
+            console.error(`[ERROR] processing document ${doc.id}:`, toSafeError(error));
             await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
             if (isRateLimitError(error)) {
               console.warn('[WARNING] AI provider rate limit encountered (HTTP 429). Stopping current scan run to avoid rapid retries.');
@@ -1718,7 +1718,6 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
     analysisError.isRateLimit = isRateLimitError(analysisError);
     throw analysisError;
   }
-  await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
   return { analysis, originalData };
 }
 
@@ -1912,20 +1911,15 @@ async function buildUpdateData(analysis, doc, existingTags = [], existingDocumen
 }
 
 async function saveDocumentChanges(docId, updateData, analysis, originalData) {
-  const { tags: originalTags, correspondent: originalCorrespondent, title: originalTitle } = originalData;
-
-  await Promise.all([
-    documentModel.saveOriginalData(docId, originalTags, originalCorrespondent, originalTitle),
-    paperlessService.updateDocument(docId, updateData),
-    documentModel.addProcessedDocument(docId, updateData.title, originalData.checksum),
-    documentModel.addOpenAIMetrics(
-      docId,
-      analysis.metrics.promptTokens,
-      analysis.metrics.completionTokens,
-      analysis.metrics.totalTokens
-    ),
-    documentModel.addToHistory(docId, updateData.tags, updateData.title, analysis.document.correspondent)
-  ]);
+  return saveAnalyzedDocumentChanges({
+    documentModel,
+    paperlessService,
+    documentId: docId,
+    statusTitle: originalData.title,
+    updateData,
+    analysis,
+    originalData
+  });
 }
 
 /**
@@ -2633,9 +2627,8 @@ async function processQueue(customPrompt) {
         const { analysis, originalData } = result;
         const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
-        await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
       } catch (error) {
-        console.error(`[ERROR] Failed to process document ${doc.id}:`, error);
+        console.error(`[ERROR] Failed to process document ${doc.id}:`, toSafeError(error));
         await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
         if (isRateLimitError(error)) {
           documentQueue.unshift(doc);
@@ -3595,8 +3588,6 @@ router.post('/manual/updateDocument', express.json(), async (req, res) => {
     const correspondentData = correspondent ? await paperlessService.getOrCreateCorrespondent(correspondent) : null;
 
 
-    await paperlessService.removeUnusedTagsFromDocument(documentId, tagIds);
-    
     // Then update with new tags (this will only add new ones since we already removed unused ones)
     const updateData = {
       tags: tagIds,
@@ -3607,15 +3598,21 @@ router.post('/manual/updateDocument', express.json(), async (req, res) => {
     if(updateData.tags === null && updateData.correspondent === null && updateData.title === null) {
       return res.status(400).json({ error: 'No changes provided' });
     }
-    const updateDocument = await paperlessService.updateDocument(documentId, updateData);
-    
-    // Mark document as processed
-    await documentModel.addProcessedDocument(documentId, updateData.title);
+
+    const updateDocument = await saveManualDocumentChanges({
+      documentModel,
+      paperlessService,
+      documentId,
+      statusTitle: title,
+      tagIds,
+      updateData
+    });
 
     res.json(updateDocument);
   } catch (error) {
-    console.error('Update error:', error);
-    res.status(500).json({ error: error.message });
+    const safeError = toSafeError(error);
+    console.error('Update error:', safeError);
+    res.status(500).json({ error: safeError.message });
   }
 });
 

@@ -14,6 +14,7 @@ const setupService = require('./services/setupService');
 const ragService = require('./services/ragService');
 const setupRoutes = require('./routes/setup');
 const { normalizeCustomFieldValueForPaperless } = require('./services/serviceUtils');
+const { saveAnalyzedDocumentChanges } = require('./services/documentUpdateService');
 
 // Add environment variables for RAG service if not already set
 process.env.RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://localhost:8000';
@@ -264,7 +265,6 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
       });
       throw new Error(`[ERROR] Document analysis failed: ${analysis.error}`);
     }
-    await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
     return { analysis, originalData };
   } catch (error) {
     await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
@@ -482,20 +482,16 @@ async function buildUpdateData(analysis, doc, existingTags = [], existingDocumen
 }
 
 async function saveDocumentChanges(docId, updateData, analysis, originalData) {
-  const { tags: originalTags, correspondent: originalCorrespondent, title: originalTitle } = originalData;
-
-  await Promise.all([
-    documentModel.saveOriginalData(docId, originalTags, originalCorrespondent, originalTitle, null),
-    paperlessService.updateDocument(docId, updateData),
-    documentModel.addProcessedDocument(docId, updateData.title, originalData.checksum),
-    documentModel.addOpenAIMetrics(
-      docId, 
-      analysis.metrics.promptTokens,
-      analysis.metrics.completionTokens,
-      analysis.metrics.totalTokens
-    ),
-    documentModel.addToHistory(docId, updateData.tags, updateData.title, analysis.document.correspondent, updateData.notes ?? null)
-  ]);
+  return saveAnalyzedDocumentChanges({
+    documentModel,
+    paperlessService,
+    documentId: docId,
+    statusTitle: originalData.title,
+    updateData,
+    analysis,
+    originalData,
+    historyNotes: updateData.notes ?? null
+  });
 }
 
 async function reconcileStaleProcessedDocuments(documents) {
@@ -557,12 +553,8 @@ async function scanInitial() {
         const { analysis, originalData } = result;
         const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
-        await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
       } catch (error) {
-        console.error(`[ERROR] processing document ${doc.id}:`, error);
-        if (error?.stack) {
-          console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
-        }
+        console.error(`[ERROR] processing document ${doc.id}:`, toSafeError(error));
         await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
       }
     }
@@ -612,12 +604,8 @@ async function scanDocuments() {
         const { analysis, originalData } = result;
         const updateData = await buildUpdateData(analysis, doc, existingTagNames, existingDocumentTypesList);
         await saveDocumentChanges(doc.id, updateData, analysis, originalData);
-        await documentModel.setProcessingStatus(doc.id, doc.title, 'complete');
       } catch (error) {
-        console.error(`[ERROR] processing document ${doc.id}:`, error);
-        if (error?.stack) {
-          console.error(`[ERROR] processing document ${doc.id} stack:`, error.stack);
-        }
+        console.error(`[ERROR] processing document ${doc.id}:`, toSafeError(error));
         await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
       }
     }

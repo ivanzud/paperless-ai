@@ -1296,11 +1296,18 @@ class PaperlessService {
   async updateDocumentContent(documentId, content) {
     this.initialize();
     try {
+      if (!this.client) {
+        const configurationError = new Error('Paperless API client is not configured');
+        configurationError.code = 'PAPERLESS_NOT_CONFIGURED';
+        throw configurationError;
+      }
+
       console.log(`[DEBUG] Updating content field for document ${documentId}...`);
       await this.client.patch(`/documents/${documentId}/`, { content });
       console.log(`[SUCCESS] Content updated for document ${documentId}`);
     } catch (error) {
-      console.error(`[ERROR] Failed to update content for document ${documentId}:`, error.message);
+      console.error(`[ERROR] Failed to update content for document ${documentId}:`, toSafeError(error));
+      throw error;
     }
   }
 
@@ -1671,7 +1678,11 @@ async getOrCreateDocumentType(name, options = {}) {
 
   async removeUnusedTagsFromDocument(documentId, keepTagIds) {
     this.initialize();
-    if (!this.client) return;
+    if (!this.client) {
+      const configurationError = new Error('Paperless API client is not configured');
+      configurationError.code = 'PAPERLESS_NOT_CONFIGURED';
+      throw configurationError;
+    }
   
     try {
       console.log(`[DEBUG] Removing unused tags from document ${documentId}, keeping tags:`, keepTagIds);
@@ -1698,7 +1709,7 @@ async getOrCreateDocumentType(name, options = {}) {
       
       return await this.getDocument(documentId);
     } catch (error) {
-      console.error(`[ERROR] Error removing unused tags from document ${documentId}:`, error.message);
+      console.error(`[ERROR] Error removing unused tags from document ${documentId}:`, toSafeError(error));
       throw error;
     }
   }
@@ -1782,7 +1793,11 @@ async getOrCreateDocumentType(name, options = {}) {
 
   async updateDocument(documentId, updates) {
     this.initialize();
-    if (!this.client) return;
+    if (!this.client) {
+      const configurationError = new Error('Paperless API client is not configured');
+      configurationError.code = 'PAPERLESS_NOT_CONFIGURED';
+      throw configurationError;
+    }
     try {
       const currentDoc = await this.getDocument(documentId);
 
@@ -1969,10 +1984,11 @@ async getOrCreateDocumentType(name, options = {}) {
       return await this.getDocument(documentId);
     } catch (error) {
       console.error(`[ERROR] updating document ${documentId}:`, toSafeError(error));
-      return null;
+      throw error;
     }
   }
 }
 
 
 module.exports = new PaperlessService();
+module.exports.PaperlessService = PaperlessService;
