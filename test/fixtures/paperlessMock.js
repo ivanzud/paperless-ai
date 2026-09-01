@@ -12,8 +12,7 @@ const document = {
   content: 'This document proves the fresh RAG index was initialized.',
   correspondent: null,
   tags: [],
-  created_date: '2026-07-31',
-  created: '2026-07-31T00:00:00Z',
+  created: '2026-07-31',
   modified: '2026-07-31T00:00:00Z'
 };
 

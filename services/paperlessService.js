@@ -995,7 +995,7 @@ class PaperlessService {
         const params = {
           page,
           page_size: 100,
-          fields: 'id,title,created,created_date,added,tags,correspondent'
+          fields: 'id,title,created,added,tags,correspondent'
         };
 
         // Füge Tag-Filter hinzu, wenn Tags definiert sind
