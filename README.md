@@ -85,6 +85,23 @@ docker compose -f docker-compose.ghcr.yml up -d
 
 ---
 
+## Tag Cache Tuning
+
+Paperless-AI caches Paperless-ngx tags locally. These optional environment
+variables reduce repeated `/api/tags/` requests while preserving complete
+pagination:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TAG_CACHE_LIFETIME` | `3000` | Cache lifetime in milliseconds. Use `3600000` for one hour when tags change infrequently. |
+| `TAG_PAGE_SIZE` | `100` | Tags requested per API page. Larger values reduce pagination requests. |
+
+Missing, non-integer, or non-positive values fall back to the defaults. A
+longer lifetime delays visibility of tag changes made outside Paperless-AI
+until the next refresh.
+
+---
+
 ## 🔧 Local Development
 
 ```bash

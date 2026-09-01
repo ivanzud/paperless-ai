@@ -9,6 +9,22 @@ const parseEnvBoolean = (value, defaultValue = 'yes') => {
   if (!value) return defaultValue;
   return value.toLowerCase() === 'true' || value === '1' || value.toLowerCase() === 'yes' ? 'yes' : 'no';
 };
+
+const parseEnvPositiveInt = (value, defaultValue) => {
+  const normalizedValue = String(value ?? '').trim();
+  if (!/^\d+$/.test(normalizedValue)) {
+    return defaultValue;
+  }
+
+  const parsedValue = Number(normalizedValue);
+  return Number.isSafeInteger(parsedValue) && parsedValue > 0 ? parsedValue : defaultValue;
+};
+
+const tagCacheConfig = {
+  lifetime: parseEnvPositiveInt(process.env.TAG_CACHE_LIFETIME, 3000),
+  pageSize: parseEnvPositiveInt(process.env.TAG_PAGE_SIZE, 100)
+};
+
 const normalizePaperlessBaseUrl = (url) => (url || '').replace(/\/+$/, '').replace(/\/api\/?$/, '');
 const paperlessApiUrl = process.env.PAPERLESS_API_URL || '';
 const paperlessExternalUrl = normalizePaperlessBaseUrl(process.env.PAPERLESS_EXTERNAL_URL || paperlessApiUrl);
@@ -56,7 +72,8 @@ console.log('Loaded environment variables:', {
   PAPERLESS_API_TOKEN: '******',
   LIMIT_FUNCTIONS: limitFunctions,
   AI_RESTRICTIONS: aiRestrictions,
-  EXTERNAL_API: externalApiConfig.enabled === 'yes' ? 'enabled' : 'disabled'
+  EXTERNAL_API: externalApiConfig.enabled === 'yes' ? 'enabled' : 'disabled',
+  TAG_CACHE: tagCacheConfig
 });
 
 module.exports = {
@@ -80,6 +97,8 @@ module.exports = {
     externalUrl: paperlessExternalUrl,
     apiToken: process.env.PAPERLESS_API_TOKEN
   },
+  tagCacheLifetime: tagCacheConfig.lifetime,
+  tagPageSize: tagCacheConfig.pageSize,
   openai: {
     apiKey: process.env.OPENAI_API_KEY
   },
