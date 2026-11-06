@@ -84,7 +84,7 @@ class GeminiService {
         systemPrompt = `
         Pre-existing tags: ${existingTags.join(', ')}\n\n
         Pre-existing correspondents: ${existingCorrespondentList}\n\n
-        Pre-existing document types: ${existingDocumentTypesList.join(', ')}\n\n
+        ${RestrictionPromptService.documentTypesLabel(config)}: ${existingDocumentTypesList.join(', ')}\n\n
         ` + process.env.SYSTEM_PROMPT + '\n\n' + mustHavePrompt;
       } else {
         systemPrompt = process.env.SYSTEM_PROMPT + '\n\n' + mustHavePrompt;

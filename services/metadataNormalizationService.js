@@ -9,7 +9,7 @@ class MetadataNormalizationService {
     return {
       ...document,
       title: this.normalizeTitle(document.title, currentDoc.title, { normalizedTags }),
-      correspondent: this.normalizeSimpleString(document.correspondent),
+      correspondent: this.normalizeCorrespondent(document.correspondent),
       tags: normalizedTags,
       document_type: this.normalizeSimpleString(document.document_type),
       document_date: this.normalizeDocumentDate(document.document_date, currentDoc.created),
@@ -113,7 +113,8 @@ class MetadataNormalizationService {
       process.env.METADATA_DROP_ADDRESS_TAGS || '',
       process.env.METADATA_TAG_DROP_EXACT || '',
       process.env.METADATA_TAG_DROP_PATTERNS || '',
-      process.env.METADATA_KEEP_NUMERIC_TAGS || ''
+      process.env.METADATA_KEEP_NUMERIC_TAGS || '',
+      process.env.METADATA_CORRESPONDENT_ALIASES || ''
     ].join('||');
 
     if (this._rulesCache?.signature === signature) {
@@ -129,6 +130,7 @@ class MetadataNormalizationService {
     const dropExactTags = this.parseJsonArray(process.env.METADATA_TAG_DROP_EXACT, 'METADATA_TAG_DROP_EXACT');
     const dropPatterns = this.parseJsonArray(process.env.METADATA_TAG_DROP_PATTERNS, 'METADATA_TAG_DROP_PATTERNS');
     const keepNumericTags = this.parseJsonArray(process.env.METADATA_KEEP_NUMERIC_TAGS, 'METADATA_KEEP_NUMERIC_TAGS');
+    const correspondentAliases = this.parseJsonObject(process.env.METADATA_CORRESPONDENT_ALIASES, 'METADATA_CORRESPONDENT_ALIASES');
 
     const value = {
       tagAliases: this.buildAliasMap(tagAliases),
@@ -140,11 +142,25 @@ class MetadataNormalizationService {
       dropAddressTags: (process.env.METADATA_DROP_ADDRESS_TAGS || 'no').toLowerCase() === 'yes',
       dropTagLookups: new Set(dropExactTags.map((tag) => this.normalizeForLookup(tag)).filter(Boolean)),
       dropTagPatterns: this.buildPatternList(dropPatterns, 'METADATA_TAG_DROP_PATTERNS'),
-      keepNumericTagLookups: new Set(keepNumericTags.map((tag) => this.normalizeForLookup(tag)).filter(Boolean))
+      keepNumericTagLookups: new Set(keepNumericTags.map((tag) => this.normalizeForLookup(tag)).filter(Boolean)),
+      correspondentAliases: this.buildAliasMap(correspondentAliases)
     };
 
     this._rulesCache = { signature, value };
     return value;
+  }
+
+  // Paperless matches correspondents by exact name, so a variant the model
+  // writes ("Acme Mortgage Servicing LLC") would otherwise become a new
+  // correspondent next to the canonical one.
+  static normalizeCorrespondent(value) {
+    const normalized = this.normalizeSimpleString(value);
+    if (!normalized) {
+      return null;
+    }
+
+    const { correspondentAliases } = this.getRules();
+    return correspondentAliases.get(this.normalizeForLookup(normalized)) || normalized;
   }
 
   static normalizeSimpleString(value) {
@@ -571,6 +587,10 @@ class MetadataNormalizationService {
     }
 
     return null;
+  }
+
+  static formatDate(date) {
+    return format(date, 'yyyy-MM-dd');
   }
 
   static parseDocumentDate(value) {

@@ -40,13 +40,18 @@ class RestrictionPromptService {
 
     const documentTypesList = this._formatDocumentTypesList(existingDocumentTypes);
     if (documentTypesList) {
-      const label = config.restrictToExistingDocumentTypes === 'yes'
-        ? 'Allowed existing document types (copy exact names only)'
-        : 'Pre-existing document types';
-      sections.push(`${label}: ${documentTypesList}`);
+      sections.push(`${this.documentTypesLabel(config)}: ${documentTypesList}`);
     }
 
     return sections.join('\n');
+  }
+
+  // With RESTRICT_TO_EXISTING_DOCUMENT_TYPES a new type is dropped after the
+  // fact, so the prompt has to say the list is closed or the model invents one.
+  static documentTypesLabel(config = {}) {
+    return config.restrictToExistingDocumentTypes === 'yes'
+      ? 'Allowed document types (choose exactly one of these names)'
+      : 'Pre-existing document types';
   }
 
   /**

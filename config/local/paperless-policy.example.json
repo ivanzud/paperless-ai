@@ -1,5 +1,9 @@
 {
   "metadata": {
+    "correspondentAliases": {
+      "Acme Life Insurance Company": "Acme Financial",
+      "The Example Store": "Example Store"
+    },
     "tagAliases": {
       "123 Main St": "Main",
       "456 Oak Ave": "Oak",
