@@ -58,3 +58,24 @@ test('labels the document type list as closed only when restricted', () => {
     'Pre-existing document types'
   );
 });
+
+test('keeps pipeline tags out of the allowed tag list', () => {
+  const previous = process.env.AI_PROCESSED_TAG_NAME;
+  process.env.AI_PROCESSED_TAG_NAME = 'ai-processed';
+  try {
+    const prompt = RestrictionPromptService.buildExistingDataPrompt(
+      ['Bill', 'ai-processed', 'paperless-gpt-ocr-auto', 'paperless-ai-auto', 'Tax'],
+      ['Example Bank'],
+      ['Bill'],
+      { useExistingData: 'yes', restrictToExistingTags: 'yes', restrictToExistingDocumentTypes: 'yes' }
+    );
+    assert.match(prompt, /Allowed existing tags \(copy exact names only\): Bill, Tax\n/);
+    assert.match(prompt, /Allowed document types \(choose exactly one of these names\): Bill/);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AI_PROCESSED_TAG_NAME;
+    } else {
+      process.env.AI_PROCESSED_TAG_NAME = previous;
+    }
+  }
+});

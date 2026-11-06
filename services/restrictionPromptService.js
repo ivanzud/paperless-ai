@@ -95,8 +95,19 @@ class RestrictionPromptService {
         if (typeof tag === 'string') return tag.trim();
         return tag?.name || '';
       })
-      .filter(name => name.length > 0)
+      .filter(name => name.length > 0 && !this.isPipelineTag(name))
       .join(', ');
+  }
+
+  // Queue and status tags drive the OCR/classification pipeline; offered to the
+  // model as ordinary tags, one could be attached and re-queue the document.
+  static isPipelineTag(name) {
+    const configured = [process.env.TAGS, process.env.AI_PROCESSED_TAG_NAME, process.env.BLOCK_SCAN_WHEN_TAGS_PRESENT]
+      .flatMap(value => String(value || '').split(','))
+      .map(value => value.trim().toLowerCase())
+      .filter(Boolean);
+    const lower = name.toLowerCase();
+    return configured.includes(lower) || /^paperless-(gpt|ai)-/.test(lower);
   }
 
   /**
