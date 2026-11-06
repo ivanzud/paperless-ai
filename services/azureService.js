@@ -126,7 +126,7 @@ class AzureOpenAIService {
         systemPrompt = `
         Pre-existing tags: ${existingTagsList}\n\n
         Pre-existing correspondents: ${existingCorrespondentList}\n\n
-        Pre-existing document types: ${existingDocumentTypesList.join(', ')}\n\n
+        ${RestrictionPromptService.documentTypesLabel(config)}: ${existingDocumentTypesList.join(', ')}\n\n
         ` + process.env.SYSTEM_PROMPT + '\n\n' + config.mustHavePrompt.replace('%CUSTOMFIELDS%', customFieldsStr).replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
         promptTags = '';
       } else {

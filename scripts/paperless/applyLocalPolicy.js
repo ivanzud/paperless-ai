@@ -217,6 +217,7 @@ function buildEnvUpdates(policy) {
     METADATA_TAG_DROP_EXACT: JSON.stringify(policy.metadata.dropExactTags || []),
     METADATA_TAG_DROP_PATTERNS: JSON.stringify(policy.metadata.dropPatterns || []),
     METADATA_KEEP_NUMERIC_TAGS: JSON.stringify(policy.metadata.keepNumericTags || []),
+    METADATA_CORRESPONDENT_ALIASES: JSON.stringify(policy.metadata.correspondentAliases || {}),
     ...(policy.paperlessAiEnv || {})
   };
 }

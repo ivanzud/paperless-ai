@@ -155,6 +155,14 @@ function normalizeCustomFieldValueForPaperless(value, fieldDetails = {}) {
         normalizedValue = normalizeMonetaryCustomFieldValue(normalizedValue);
     }
 
+    // Paperless rejects a date field that is not YYYY-MM-DD, failing the whole
+    // update; an unparseable date becomes empty so the field is skipped.
+    if (String(dataType).toLowerCase() === 'date' && typeof normalizedValue === 'string') {
+        const MetadataNormalizationService = require('./metadataNormalizationService');
+        const parsed = MetadataNormalizationService.parseDocumentDate(normalizedValue);
+        normalizedValue = parsed ? MetadataNormalizationService.formatDate(parsed) : '';
+    }
+
     if (
         typeof normalizedValue === 'string'
         && !isLongTextCustomField(dataType)
