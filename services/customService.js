@@ -447,9 +447,6 @@ class CustomOpenAIService {
         await fs.writeFile(cachePath, thumbnailData);
       }
 
-      // Format existing tags
-      let existingTagsList = existingTags.join(', ');
-
       // Get external API data if available and validate it
       let externalApiData = options.externalApiData || null;
       let validatedExternalApiData = null;
@@ -497,25 +494,29 @@ class CustomOpenAIService {
       const correspondentInstruction = (config.limitFunctions?.activateCorrespondents !== 'no' && existingCorrespondentList && existingCorrespondentList.length > 0)
         ? `IMPORTANT: The following correspondents already exist in the system: ${Array.isArray(existingCorrespondentList) ? existingCorrespondentList.join(', ') : existingCorrespondentList}\nWhen identifying the correspondent, prefer an existing one if the document's sender is a close match. Use EXACTLY that existing name (e.g. if the document shows "MediaMarkt Saturn Media GmbH" and "MediaMarkt" is in the list, return "MediaMarkt"). Only return a completely new name if none of the existing correspondents are a reasonable match.`
         : '';
-      if (config.useExistingData === 'yes' && config.restrictToExistingTags === 'no' && config.restrictToExistingCorrespondents === 'no') {
-        systemPrompt = `
-        Pre-existing tags: ${existingTagsList}\n\n
-        Pre-existing correspondents: ${existingCorrespondentList}\n\n
-        ${RestrictionPromptService.documentTypesLabel(config)}: ${existingDocumentTypesList.join(', ')}\n\n
-        ` + process.env.SYSTEM_PROMPT + '\n\n' + config.mustHavePrompt.replace('%CUSTOMFIELDS%', customFieldsStr).replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
-        promptTags = '';
-      } else {
-        config.mustHavePrompt = config.mustHavePrompt.replace('%CUSTOMFIELDS%', customFieldsStr).replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
-        systemPrompt = process.env.SYSTEM_PROMPT + '\n\n' + config.mustHavePrompt;
-        promptTags = '';
-      }
+      // Build the prompt without touching config.mustHavePrompt: replacing its
+      // placeholders in place froze the first document's correspondent list
+      // into every later prompt. The existing-data block is included whatever
+      // the restrictions are, so a restricted run still sees the allowed names.
+      const mustHavePrompt = config.mustHavePrompt
+        .replace('%CUSTOMFIELDS%', customFieldsStr)
+        .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+      const existingDataPrompt = RestrictionPromptService.buildExistingDataPrompt(
+        existingTags,
+        existingCorrespondentList,
+        existingDocumentTypesList,
+        config
+      );
+      systemPrompt = [existingDataPrompt, process.env.SYSTEM_PROMPT, mustHavePrompt]
+        .filter(Boolean)
+        .join('\n\n');
+      promptTags = '';
 
       // Process placeholder replacements in system prompt
       systemPrompt = RestrictionPromptService.processRestrictionsInPrompt(
         systemPrompt,
         existingTags,
         existingCorrespondentList,
-        existingDocumentTypesList,
         config
       );
 
@@ -534,7 +535,7 @@ class CustomOpenAIService {
       // Custom prompt override if provided
       if (customPrompt) {
         console.log('[DEBUG] Replace system prompt with custom prompt');
-        systemPrompt = customPrompt + '\n\n' + config.mustHavePrompt;
+        systemPrompt = customPrompt + '\n\n' + mustHavePrompt;
       }
 
       // Calculate tokens AFTER all prompt modifications are complete
