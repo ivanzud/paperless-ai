@@ -85,6 +85,15 @@ docker compose -f docker-compose.ghcr.yml up -d
 
 ---
 
+## Prompt Tag List
+
+With `USE_EXISTING_DATA=yes` the custom (OpenAI-compatible) provider lists the
+existing tags, correspondents and document types in the prompt.
+`PROMPT_EXISTING_TAGS=no` leaves the tag list out: a small model given a long
+list tends to attach plausible but wrong tags from it. With
+`RESTRICT_TO_EXISTING_TAGS=yes` tags it names that do not exist are still
+dropped.
+
 ## Tag Cache Tuning
 
 Paperless-AI caches Paperless-ngx tags locally. These optional environment

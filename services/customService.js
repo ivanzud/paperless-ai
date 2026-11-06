@@ -501,8 +501,11 @@ class CustomOpenAIService {
       const mustHavePrompt = config.mustHavePrompt
         .replace('%CUSTOMFIELDS%', customFieldsStr)
         .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+      // A long tag list leads small models to attach plausible-looking but
+      // wrong tags from it (unrelated tags it saw in the list), so it can be
+      // left out while the correspondent and document type lists stay.
       const existingDataPrompt = RestrictionPromptService.buildExistingDataPrompt(
-        existingTags,
+        process.env.PROMPT_EXISTING_TAGS === 'no' ? [] : existingTags,
         existingCorrespondentList,
         existingDocumentTypesList,
         config
