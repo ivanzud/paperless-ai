@@ -17,7 +17,7 @@ RUN if [ -n "$TORCH_EXTRA" ]; then \
   find /app/venv -type d -name 'tests' -exec rm -rf {} + && \
   find /app/venv -type d -name 'test' -exec rm -rf {} +
 
-FROM node:22-trixie-slim AS node-builder
+FROM node:22.23.4-trixie-slim@sha256:be1e2a3dc2c4fd68cdfadad2a696a280e0d2749098bee509230174d72fb768c6 AS node-builder
 
 WORKDIR /app
 
@@ -31,7 +31,7 @@ COPY package*.json ./
 # Install node dependencies with clean install
 RUN npm ci --omit=dev && npm cache clean --force
 
-FROM node:22-trixie-slim
+FROM node:22.23.4-trixie-slim@sha256:be1e2a3dc2c4fd68cdfadad2a696a280e0d2749098bee509230174d72fb768c6
 
 WORKDIR /app
 
