@@ -79,3 +79,28 @@ test('keeps pipeline tags out of the allowed tag list', () => {
     }
   }
 });
+
+function withTitleRules(tagAliases, fn) {
+  const previous = process.env.METADATA_TAG_ALIASES;
+  process.env.METADATA_TAG_ALIASES = JSON.stringify(tagAliases);
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.METADATA_TAG_ALIASES;
+    } else {
+      process.env.METADATA_TAG_ALIASES = previous;
+    }
+  }
+}
+
+test('title replacement does not re-expand a name that is already canonical', () => {
+  withTitleRules({ Qingchun: 'Qingchun Zhang', Zhang: 'Qingchun Zhang', 'QINGCHUN ZHANG': 'Qingchun Zhang', 8902: 'Marina Bay' }, () => {
+    const apply = (title) => MetadataNormalizationService.applyTitleReplacements(title);
+    assert.equal(apply('Toll Invoice 2025 - Qingchun Zhang'), 'Toll Invoice 2025 - Qingchun Zhang');
+    assert.equal(apply('Toll Invoice 2025 - QINGCHUN ZHANG'), 'Toll Invoice 2025 - Qingchun Zhang');
+    assert.equal(apply('401(k) Statement - Qingchun'), '401(k) Statement - Qingchun Zhang');
+    assert.equal(apply('Water Bill - 8902'), 'Water Bill - Marina Bay');
+    assert.equal(apply('Account 89021'), 'Account 89021');
+  });
+});

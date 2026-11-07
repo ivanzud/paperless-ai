@@ -134,7 +134,7 @@ class MetadataNormalizationService {
 
     const value = {
       tagAliases: this.buildAliasMap(tagAliases),
-      titleReplacements: this.buildAliasEntries({
+      titleReplacements: this.buildTitleReplacements({
         ...tagAliases,
         ...titleReplacements
       }),
@@ -246,24 +246,38 @@ class MetadataNormalizationService {
     return aliasMap;
   }
 
-  static buildAliasEntries(rawMap = {}) {
-    return Object.entries(rawMap)
-      .map(([source, target]) => {
-        const normalizedSource = this.normalizeSimpleString(source);
-        const normalizedTarget = this.normalizeSimpleString(target);
+  // One pass over the title with every source (and every target, mapped to
+  // itself) in a single longest-first alternation. Applied one after another,
+  // "Qingchun" -> "Qingchun Zhang" re-expanded titles that were already right
+  // ("Qingchun Zhang Zhang"); a matched name is now consumed whole.
+  static buildTitleReplacements(rawMap = {}) {
+    const replacements = new Map();
+    for (const [source, target] of Object.entries(rawMap)) {
+      const normalizedSource = this.normalizeSimpleString(source);
+      const normalizedTarget = this.normalizeSimpleString(target);
 
-        if (!normalizedSource || !normalizedTarget) {
-          return null;
-        }
+      if (!normalizedSource || !normalizedTarget) {
+        continue;
+      }
 
-        return {
-          source: normalizedSource,
-          replacement: normalizedTarget,
-          regex: new RegExp(this.escapeRegex(normalizedSource), 'gi')
-        };
-      })
-      .filter(Boolean)
-      .sort((left, right) => right.source.length - left.source.length);
+      replacements.set(normalizedSource.toLowerCase(), normalizedTarget);
+      if (!replacements.has(normalizedTarget.toLowerCase())) {
+        replacements.set(normalizedTarget.toLowerCase(), normalizedTarget);
+      }
+    }
+
+    if (replacements.size === 0) {
+      return null;
+    }
+
+    const alternation = [...replacements.keys()]
+      .sort((left, right) => right.length - left.length)
+      .map((source) => this.escapeRegex(source))
+      .join('|');
+    return {
+      replacements,
+      regex: new RegExp(`(?<![A-Za-z0-9])(?:${alternation})(?![A-Za-z0-9])`, 'gi')
+    };
   }
 
   static escapeRegex(value) {
@@ -355,9 +369,14 @@ class MetadataNormalizationService {
 
   static applyTitleReplacements(value) {
     const { titleReplacements } = this.getRules();
-    return titleReplacements.reduce((currentValue, entry) => {
-      return currentValue.replace(entry.regex, entry.replacement);
-    }, value);
+    if (!titleReplacements) {
+      return value;
+    }
+
+    return value.replace(
+      titleReplacements.regex,
+      (match) => titleReplacements.replacements.get(match.toLowerCase()) || match
+    );
   }
 
   static normalizeTagName(tagName) {
