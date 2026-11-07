@@ -79,3 +79,28 @@ test('keeps pipeline tags out of the allowed tag list', () => {
     }
   }
 });
+
+function withTitleRules(tagAliases, fn) {
+  const previous = process.env.METADATA_TAG_ALIASES;
+  process.env.METADATA_TAG_ALIASES = JSON.stringify(tagAliases);
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.METADATA_TAG_ALIASES;
+    } else {
+      process.env.METADATA_TAG_ALIASES = previous;
+    }
+  }
+}
+
+test('title replacement does not re-expand a name that is already canonical', () => {
+  withTitleRules({ Jane: 'Jane Doe', Doe: 'Jane Doe', 'JANE DOE': 'Jane Doe', 1234: 'Maple Court' }, () => {
+    const apply = (title) => MetadataNormalizationService.applyTitleReplacements(title);
+    assert.equal(apply('Phone Invoice 2025 - Jane Doe'), 'Phone Invoice 2025 - Jane Doe');
+    assert.equal(apply('Phone Invoice 2025 - JANE DOE'), 'Phone Invoice 2025 - Jane Doe');
+    assert.equal(apply('401(k) Statement - Jane'), '401(k) Statement - Jane Doe');
+    assert.equal(apply('Water Bill - 1234'), 'Water Bill - Maple Court');
+    assert.equal(apply('Account 12341'), 'Account 12341');
+  });
+});
