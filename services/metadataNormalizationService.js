@@ -594,7 +594,9 @@ class MetadataNormalizationService {
   }
 
   static normalizeDocumentDate(candidateDate, fallbackDate) {
-    const parsedCandidate = this.parseDocumentDate(candidateDate);
+    // The candidate comes from the model and is parsed strictly; the fallback
+    // is the date Paperless already has and only needs to be read.
+    const parsedCandidate = this.parseStrictDate(candidateDate);
     const parsedFallback = this.parseDocumentDate(fallbackDate);
 
     if (this.isAcceptableDate(parsedCandidate, parsedFallback)) {

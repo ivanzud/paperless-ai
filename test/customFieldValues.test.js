@@ -109,3 +109,21 @@ test('other custom field types drop placeholders and keep real values', () => {
   assert.equal(normalizeCustomFieldValueForPaperless('x'.repeat(200), { data_type: 'string' }).length, 128);
   assert.equal(normalizeCustomFieldValueForPaperless('x'.repeat(200), { data_type: 'longtext' }).length, 200);
 });
+
+test('document date from the model is parsed strictly and falls back to the stored date', () => {
+  const normalize = (candidate, fallback = '2025-03-04') => MetadataNormalizationService.normalizeDocumentDate(candidate, fallback);
+  assert.equal(normalize('2025-02-13'), '2025-02-13');
+  assert.equal(normalize('02/13/2025'), '2025-02-13');
+  assert.equal(normalize('02-10-2025'), '2025-02-10');
+  assert.equal(normalize('01/13/25'), '2025-01-13');
+  assert.equal(normalize('February 13, 2025'), '2025-02-13');
+  // A bare year used to become January 1st of that year.
+  assert.equal(normalize('2025'), '2025-03-04');
+  assert.equal(normalize('21'), '2025-03-04');
+  assert.equal(normalize('unknown'), '2025-03-04');
+  assert.equal(normalize('2999-01-01'), '2025-03-04');
+  assert.equal(normalize('1985-06-01'), '2025-03-04');
+  assert.equal(normalize('1985-06-01', '1986-01-01'), '1985-06-01');
+  assert.equal(normalize('garbage', null), null);
+  assert.equal(normalize('2025-02-13', '2025-03-04T00:00:00+00:00'), '2025-02-13');
+});
