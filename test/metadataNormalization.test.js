@@ -182,6 +182,46 @@ test('title replacements leave amounts, identifiers and parts of other tokens al
   });
 });
 
+test('property suffix rewrite keeps the person on personal documents', () => {
+  withEnv({
+    METADATA_PROPERTY_TAGS: 'Maple Court,Oak',
+    METADATA_TAG_ALIASES: { 1234: 'Maple Court', '456 Oak Ave': 'Oak' },
+    METADATA_TITLE_REPLACEMENTS: undefined
+  }, () => {
+    const rewrite = (title, tags = ['Bill', 'Maple Court']) => MetadataNormalizationService.rewritePropertyTitleSuffix(title, tags);
+
+    for (const title of [
+      '401(k) Statement 2024 - Jane Doe',
+      'Credit Card Statement - Jane Doe',
+      'Toll Invoice August 2025 - John Doe',
+      'Vehicle Registration 2025 - Jane Doe',
+      'Health Statement January 2026 - Jane Doe',
+      'Phone Bill March 2025 - John Doe',
+      'W-2 2024 - Jane Doe',
+      'Tax Notice 2025 - Jane Doe',
+      'Receipt - Jane & John Doe',
+      'Auto Insurance Policy and Home Insurance Bundle - Jane Doe'
+    ]) {
+      assert.equal(rewrite(title), title);
+    }
+
+    // Documents about the property get the property.
+    assert.equal(rewrite('Water Bill March 2025 - Jane Doe'), 'Water Bill March 2025 - Maple Court');
+    assert.equal(rewrite('Property Tax Statement 2025 - Jane & John Doe'), 'Property Tax Statement 2025 - Maple Court');
+    assert.equal(rewrite('HOA Assessment 2025 - JANE DOE'), 'HOA Assessment 2025 - Maple Court');
+    assert.equal(rewrite('Mortgage Statement - Jane Doe'), 'Mortgage Statement - Maple Court');
+
+    // An address is replaced only by the property it belongs to.
+    assert.equal(rewrite('Statement 2025 - 1234 Maple Court Dr'), 'Statement 2025 - Maple Court');
+    assert.equal(rewrite('Statement 2025 - 456 Oak Ave', ['Maple Court', 'Oak']), 'Statement 2025 - Oak');
+    assert.equal(rewrite('Statement 2025 - 99 Elm Street'), 'Statement 2025 - 99 Elm Street');
+
+    // No property tag, nothing to do.
+    assert.equal(rewrite('Water Bill March 2025 - Jane Doe', ['Bill']), 'Water Bill March 2025 - Jane Doe');
+    assert.equal(rewrite('Water Bill March 2025 - Maple Court'), 'Water Bill March 2025 - Maple Court');
+  });
+});
+
 test('tag drop rules', () => {
   withEnv({
     METADATA_TAG_ALIASES: { '123 Main St': 'Main' },

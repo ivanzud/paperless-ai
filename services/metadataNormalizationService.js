@@ -502,22 +502,22 @@ class MetadataNormalizationService {
     return /^[A-Z][A-Za-z.'’-]+(?:\s+[A-Z][A-Za-z.'’-]+){1,3}$/.test(smartCased);
   }
 
+  // Titles of documents about a property end in the property name instead of
+  // an owner or a street address ("Water Bill 2025 - Maple Court"). A property
+  // tag alone is not enough to do that: the tag is also assigned to personal
+  // documents of the people living there, and those keep the person.
   static rewritePropertyTitleSuffix(title, normalizedTags = []) {
     if (!title || !Array.isArray(normalizedTags) || normalizedTags.length === 0) {
       return title;
     }
 
-    const { propertyTagLookups } = this.getRules();
+    const { propertyTagLookups, tagAliases } = this.getRules();
     if (propertyTagLookups.size === 0) {
       return title;
     }
 
-    const propertyAlias = normalizedTags.find((tag) => propertyTagLookups.has(this.normalizeForLookup(tag)));
-    if (!propertyAlias) {
-      return title;
-    }
-
-    if (!/\b(assessment|bill|invoice|loan|mortgage|notice|policy|receipt|registration|statement|tax)\b/i.test(title)) {
+    const propertyTags = normalizedTags.filter((tag) => propertyTagLookups.has(this.normalizeForLookup(tag)));
+    if (propertyTags.length === 0) {
       return title;
     }
 
@@ -527,15 +527,34 @@ class MetadataNormalizationService {
     }
 
     const currentSuffix = parts[parts.length - 1].trim();
-    if (!currentSuffix || this.normalizeForLookup(currentSuffix) === this.normalizeForLookup(propertyAlias)) {
+    const suffixLookup = this.normalizeForLookup(currentSuffix);
+    if (!suffixLookup || propertyTags.some((tag) => this.normalizeForLookup(tag) === suffixLookup)) {
       return title;
     }
 
-    if (!this.looksLikePersonOrAddressLabel(currentSuffix)) {
+    let replacement = null;
+    if (this.looksLikeStreetAddress(currentSuffix)) {
+      // An address is only replaced by the property it belongs to.
+      const houseNumber = suffixLookup.split(' ')[0];
+      replacement = propertyTags.find((tag) => {
+        const tagLookup = this.normalizeForLookup(tag);
+        return this.normalizeForLookup(tagAliases.get(suffixLookup)) === tagLookup
+          || this.normalizeForLookup(tagAliases.get(houseNumber)) === tagLookup
+          || ` ${suffixLookup} `.includes(` ${tagLookup} `);
+      });
+    } else if (
+      this.looksLikePersonOrAddressLabel(currentSuffix)
+      && this.PROPERTY_TITLE_PATTERN.test(title)
+      && !this.PERSONAL_TITLE_PATTERN.test(title)
+    ) {
+      replacement = propertyTags[0];
+    }
+
+    if (!replacement) {
       return title;
     }
 
-    parts[parts.length - 1] = propertyAlias;
+    parts[parts.length - 1] = replacement;
     return parts.join(' - ');
   }
 
@@ -770,5 +789,10 @@ class MetadataNormalizationService {
     return true;
   }
 }
+
+// Words that make a title about a building rather than about a person.
+MetadataNormalizationService.PROPERTY_TITLE_PATTERN = /\b(?:electric(?:ity)?|water|sewer|trash|garbage|utilit(?:y|ies)|hoa|poa|home ?owners?|property tax|real estate tax|assessment|mortgage|escrow|flood|hazard insurance|home insurance|deed|appraisal)\b/i;
+// Words that make it personal even when a property word is present too.
+MetadataNormalizationService.PERSONAL_TITLE_PATTERN = /\b(?:credit card|debit card|toll|vehicle|auto|car|registration|401\(?k\)?|ira|health|medical|dental|vision|w-?2|1099(?:-[a-z]+)?|1095(?:-[a-z])?|pay ?(?:stub|slip|statement)|payroll|phone|mobile|wireless|student|tuition|passport|licen[cs]e)\b/i;
 
 module.exports = MetadataNormalizationService;
