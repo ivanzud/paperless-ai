@@ -20,7 +20,8 @@ const {
   createFailedDocumentTracker,
   getFailedTagName,
   getMaxAttempts,
-  isBackendUnavailable
+  isBackendUnavailable,
+  isConfigurationProblem
 } = require('../services/failedDocumentService');
 console.log = originalConsole.log;
 
@@ -126,6 +127,38 @@ test('an unreachable backend is not counted against the document', async (t) => 
   assert.equal(isBackendUnavailable(new Error('Document has no text content')), false);
   assert.equal(isBackendUnavailable(Object.assign(new Error('Request failed with status code 400'), { response: { status: 400 } })), false);
   assert.equal(isBackendUnavailable(new Error('chunk 1: 400 request (9000 tokens) exceeds the available context size (8192 tokens)')), false);
+});
+
+test('a configuration problem is not counted against the documents it hits', async (t) => {
+  const { paperless, tracker } = setup(t);
+  const analysisFailed = '[ERROR] Document analysis failed: ';
+  const problems = [
+    new Error(`${analysisFailed}Document analysis failed for all chunks. Details: chunk 1: 404 no router for requested model`),
+    new Error(`${analysisFailed}Document analysis failed for all chunks. Details: chunk 1: 404 status code (no body) | chunk 2: 404 status code (no body)`),
+    new Error(`${analysisFailed}Token limit exceeded: prompt too large for available token limit`),
+    new Error(`${analysisFailed}Prompt description is too large for configured model context. Prompt tokens: 5200, max input budget: 5000. Reduce Prompt Description or increase Token Limit.`),
+    new Error(`${analysisFailed}Custom OpenAI client not initialized`),
+    Object.assign(new Error('Paperless API client is not configured'), { code: 'PAPERLESS_NOT_CONFIGURED' })
+  ];
+
+  // More scans than the limit, for more than one document: nothing is counted or tagged.
+  for (const doc of [{ id: 510, title: 'Scan 0510', tags: [QUEUE_TAG] }, { id: 511, title: 'Scan 0511', tags: [QUEUE_TAG] }]) {
+    for (const problem of problems) {
+      assert.equal(isConfigurationProblem(problem), true, problem.message);
+      assert.deepEqual(await tracker.recordFailure(doc, problem), { counted: false, attempts: 0, gaveUp: false });
+    }
+    assert.equal(await documentModel.getProcessingFailure(doc.id), null);
+    assert.equal(await tracker.shouldSkip(doc), false);
+  }
+  assert.equal(paperless.patches.length, 0);
+  assert.equal(paperless.createdTags.length, 0);
+
+  // Failures that are about the document itself are still counted.
+  assert.equal(isConfigurationProblem(invalidAnswer), false);
+  assert.equal(isConfigurationProblem(new Error('Document has no text content')), false);
+  assert.equal(isConfigurationProblem(Object.assign(new Error('Request failed with status code 404'), { response: { status: 404 } })), false);
+  assert.equal(isConfigurationProblem(new Error('chunk 1: 400 request (9000 tokens) exceeds the available context size (8192 tokens)')), false);
+  assert.equal(isConfigurationProblem(new Error('chunk 1: The model response was cut off at the response token limit before the JSON was complete')), false);
 });
 
 test('a tag that could not be set is set at a later scan, and the document is skipped meanwhile', async (t) => {

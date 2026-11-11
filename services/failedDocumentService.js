@@ -44,6 +44,25 @@ function isBackendUnavailable(error) {
     || /(^|: )(401|403|408|429|5\d\d)\b/.test(message);
 }
 
+// A wrong setting fails every document in the same way: a model name the
+// provider does not know, a prompt that leaves no room for any document text,
+// a client that was never set up. Counting those would mark the whole queue as
+// failed within a few scans, so they are left for the operator to correct.
+function isConfigurationProblem(error) {
+  if (!error) {
+    return false;
+  }
+
+  if (String(error.code || '').toUpperCase() === 'PAPERLESS_NOT_CONFIGURED') {
+    return true;
+  }
+
+  const message = String(error.message || '').toLowerCase();
+  return /prompt description is too large|token limit exceeded: prompt too large|client not initialized|client is not initialized/.test(message)
+    // "<status> <text>" is how the AI client reports a provider error; 404 there means an unknown model or endpoint.
+    || /(^|: )404\b/.test(message);
+}
+
 function describeError(error) {
   return String(error?.message || error || 'unknown error').replace(/\s+/g, ' ').slice(0, 300);
 }
@@ -115,6 +134,11 @@ function createFailedDocumentTracker({ documentModel, paperlessService, env = pr
         return { counted: false, attempts: 0, gaveUp: false };
       }
 
+      if (isConfigurationProblem(error)) {
+        console.warn(`[WARN] Document ${doc.id} failed because of a configuration problem, not because of the document; the failure is not counted:`, describeError(error));
+        return { counted: false, attempts: 0, gaveUp: false };
+      }
+
       const attempts = await documentModel.recordProcessingFailure(doc.id, describeError(error));
       if (attempts < maxAttempts) {
         console.log(`[INFO] Document ${doc.id} failed (attempt ${attempts} of ${maxAttempts}); it will be tried again at the next scan.`);
@@ -140,5 +164,6 @@ module.exports = {
   createFailedDocumentTracker,
   getFailedTagName,
   getMaxAttempts,
-  isBackendUnavailable
+  isBackendUnavailable,
+  isConfigurationProblem
 };
