@@ -377,8 +377,43 @@ class CustomOpenAIService {
     };
   }
 
-  async _analyzeSingleChunk(systemPrompt, chunkContent, model, timestamp) {
-    const response = await this._createChatCompletionWithRetry({
+  // Limits for the answer. Without max_tokens a model that starts repeating
+  // itself runs until the context is full, and without a JSON response format
+  // it is free to wrap the object in prose or code fences.
+  //   CUSTOM_MAX_TOKENS_PARAM  max_tokens (default) | max_completion_tokens | none
+  //   CUSTOM_RESPONSE_FORMAT   json_object (default) | none
+  _buildResponseOptions(responseTokenBudget) {
+    const options = {};
+
+    const limit = Math.floor(Number(responseTokenBudget));
+    const limitParam = String(process.env.CUSTOM_MAX_TOKENS_PARAM || 'max_tokens').trim().toLowerCase();
+    if (Number.isFinite(limit) && limit > 0 && ['max_tokens', 'max_completion_tokens'].includes(limitParam)) {
+      options[limitParam] = limit;
+    }
+
+    const format = String(process.env.CUSTOM_RESPONSE_FORMAT || 'json_object').trim().toLowerCase();
+    if (format === 'json_object' && !this.responseFormatRejected) {
+      options.response_format = { type: 'json_object' };
+    }
+
+    return options;
+  }
+
+  _isResponseFormatRejection(error) {
+    const status = error?.status || error?.response?.status;
+    if (status !== 400 && status !== 422) {
+      return false;
+    }
+    const message = `${error?.message || ''} ${error?.error?.message || ''}`.toLowerCase();
+    const param = String(error?.param || error?.error?.param || '').toLowerCase();
+    return param.includes('response_format')
+      || message.includes('response_format')
+      || message.includes('response format')
+      || message.includes('json_object');
+  }
+
+  async _analyzeSingleChunk(systemPrompt, chunkContent, model, timestamp, responseTokenBudget = null) {
+    const payload = {
       model: model,
       messages: [
         {
@@ -391,9 +426,29 @@ class CustomOpenAIService {
         }
       ],
       ...buildTemperatureOption(model, 0.3),
-    }, 'analyzeDocument chunk');
+      ...this._buildResponseOptions(responseTokenBudget),
+    };
 
-    if (!response?.choices?.[0]?.message?.content) {
+    let response;
+    try {
+      response = await this._createChatCompletionWithRetry(payload, 'analyzeDocument chunk');
+    } catch (error) {
+      if (!payload.response_format || !this._isResponseFormatRejection(error)) {
+        throw error;
+      }
+      // Not every OpenAI-compatible server knows JSON mode. Remember that and
+      // carry on without it instead of failing every document.
+      console.warn('[WARNING] The AI backend rejected response_format json_object; continuing without it. Set CUSTOM_RESPONSE_FORMAT=none to stop asking for it.');
+      this.responseFormatRejected = true;
+      delete payload.response_format;
+      response = await this._createChatCompletionWithRetry(payload, 'analyzeDocument chunk');
+    }
+
+    const choice = response?.choices?.[0];
+    if (!choice?.message?.content) {
+      if (choice?.finish_reason === 'length') {
+        throw new Error('The model used its whole response token budget without producing an answer');
+      }
       throw new Error('Invalid API response structure');
     }
 
@@ -402,11 +457,21 @@ class CustomOpenAIService {
 
     let parsedResponse;
     try {
-      parsedResponse = this._parseResponseJson(response.choices[0].message.content);
+      parsedResponse = this._parseResponseJson(choice.message.content);
+    } catch (error) {
+      if (choice.finish_reason === 'length') {
+        throw new Error('The model response was cut off at the response token limit before the JSON was complete');
+      }
+      console.error('Failed to parse JSON response:', error.message);
+      throw new Error('Invalid JSON response from API');
+    }
+
+    // Kept out of the parse block: a full disk or a missing logs directory is
+    // not an invalid model response and must not fail the document.
+    try {
       await fs.appendFile('./logs/response.txt', JSON.stringify(parsedResponse));
     } catch (error) {
-      console.error('Failed to parse JSON response:', error);
-      throw new Error('Invalid JSON response from API');
+      console.warn('[WARNING] Could not write the response log:', error.message);
     }
 
     return {
@@ -602,7 +667,7 @@ class CustomOpenAIService {
           let chunkContent = await truncateToTokenLimit(chunk.content, chunkTokenBudget, model);
           chunkContent = await this._fitChunkToInputBudget(systemPrompt, chunkContent, model, maxInputTokens);
           try {
-            const chunkResult = await this._analyzeSingleChunk(systemPrompt, chunkContent, model, timestamp);
+            const chunkResult = await this._analyzeSingleChunk(systemPrompt, chunkContent, model, timestamp, responseTokenBudget);
             successfulChunkDocuments.push(chunkResult.document);
             aggregatePromptTokens += chunkResult.metrics.promptTokens;
             aggregateCompletionTokens += chunkResult.metrics.completionTokens;
