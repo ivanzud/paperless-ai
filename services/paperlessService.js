@@ -677,7 +677,11 @@ class PaperlessService {
       if (this.normalizeForLookup(normalizedTagName) !== this.normalizeForLookup(currentTag.name)) {
         resolvedTag = await this.findExistingTag(normalizedTagName);
         if (!resolvedTag) {
-          resolvedTag = await this.createTagSafely(normalizedTagName);
+          // An alias target that does not exist yet is only created when new
+          // tags are allowed at all; otherwise the tag stays as it is.
+          resolvedTag = process.env.RESTRICT_TO_EXISTING_TAGS === 'yes'
+            ? currentTag
+            : await this.createTagSafely(normalizedTagName);
         }
       }
 
@@ -1911,9 +1915,13 @@ async getOrCreateDocumentType(name, options = {}) {
         console.log(`[DEBUG] Current correspondent:`, currentDoc.correspondent);
         console.log(`[DEBUG] New correspondent:`, updates.correspondent);
 
-        const normalizedCurrentTags = await this.normalizeTagIds(currentDoc.tags || []);
+        // The drop and alias rules are for what the model proposes. Tags the
+        // document already carries were put there by a person or a workflow
+        // and are sent back exactly as they are; running them through the
+        // rules removed them without a trace.
+        const currentTags = Array.isArray(currentDoc.tags) ? currentDoc.tags : [];
         const normalizedIncomingTags = await this.normalizeTagIds(updates.tags || []);
-        const combinedTags = [...new Set([...normalizedCurrentTags, ...normalizedIncomingTags])];
+        const combinedTags = [...new Set([...currentTags, ...normalizedIncomingTags])];
         updates.tags = combinedTags;
         
         console.log(`[DEBUG] Combined tags:`, combinedTags);
