@@ -281,3 +281,44 @@ test('normalizeTags removes duplicates and caps the number of tags', () => {
     assert.deepEqual(MetadataNormalizationService.normalizeTags('Bill', 4), []);
   });
 });
+
+test('custom fields are kept only for the document types they are configured for', (t) => {
+  const original = console.log;
+  console.log = () => {};
+  t.after(() => {
+    console.log = original;
+  });
+
+  const fields = () => ({
+    0: { field_name: 'Amount', value: '45.00' },
+    1: { field_name: 'Due Date', value: '2026-01-13' },
+    2: { field_name: 'Reference', value: 'REF-1234' }
+  });
+  const names = (document) => Object.values(document.custom_fields).map((field) => field.field_name);
+  const normalize = (documentType, customFields = fields()) => MetadataNormalizationService.normalizeAnalysisDocument({
+    title: 'Acme Document',
+    document_type: documentType,
+    custom_fields: customFields
+  });
+
+  withEnv({
+    METADATA_CUSTOM_FIELD_DOCUMENT_TYPES: { Amount: ['Bill', 'Invoice', 'Receipt'], 'due date': ['Bill', 'Invoice'] }
+  }, () => {
+    assert.deepEqual(names(normalize('Invoice')), ['Amount', 'Due Date', 'Reference']);
+    assert.deepEqual(names(normalize('  bill ')), ['Amount', 'Due Date', 'Reference']);
+    assert.deepEqual(names(normalize('Receipt')), ['Amount', 'Reference']);
+    // Wages on a tax form are not an amount to pay.
+    assert.deepEqual(names(normalize('Tax Document')), ['Reference']);
+    assert.deepEqual(names(normalize(null)), ['Reference']);
+
+    const asArray = normalize('Tax Document', Object.values(fields()));
+    assert.equal(Array.isArray(asArray.custom_fields), true);
+    assert.deepEqual(names(asArray), ['Reference']);
+
+    assert.equal(MetadataNormalizationService.normalizeAnalysisDocument({ document_type: 'Invoice' }).custom_fields, undefined);
+  });
+
+  withEnv({ METADATA_CUSTOM_FIELD_DOCUMENT_TYPES: undefined }, () => {
+    assert.deepEqual(names(normalize('Tax Document')), ['Amount', 'Due Date', 'Reference']);
+  });
+});

@@ -28,7 +28,11 @@
     ],
     "keepNumericTags": [
       "1234"
-    ]
+    ],
+    "customFieldDocumentTypes": {
+      "Amount": ["Bill", "Invoice", "Receipt"],
+      "Due Date": ["Bill", "Invoice"]
+    }
   },
   "paperlessAiEnv": {
     "DISABLE_AUTOMATIC_PROCESSING": "no",

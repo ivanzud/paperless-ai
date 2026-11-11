@@ -218,6 +218,7 @@ function buildEnvUpdates(policy) {
     METADATA_TAG_DROP_PATTERNS: JSON.stringify(policy.metadata.dropPatterns || []),
     METADATA_KEEP_NUMERIC_TAGS: JSON.stringify(policy.metadata.keepNumericTags || []),
     METADATA_CORRESPONDENT_ALIASES: JSON.stringify(policy.metadata.correspondentAliases || {}),
+    METADATA_CUSTOM_FIELD_DOCUMENT_TYPES: JSON.stringify(policy.metadata.customFieldDocumentTypes || {}),
     ...(policy.paperlessAiEnv || {})
   };
 }

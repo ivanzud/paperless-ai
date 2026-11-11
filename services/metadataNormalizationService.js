@@ -5,16 +5,70 @@ class MetadataNormalizationService {
     const currentDoc = options.currentDoc || {};
     const maxTags = Number.isInteger(options.maxTags) ? options.maxTags : 4;
     const normalizedTags = this.normalizeTags(document.tags, maxTags);
+    const documentType = this.normalizeSimpleString(document.document_type);
 
     return {
       ...document,
       title: this.normalizeTitle(document.title, currentDoc.title, { normalizedTags }),
       correspondent: this.normalizeCorrespondent(document.correspondent),
       tags: normalizedTags,
-      document_type: this.normalizeSimpleString(document.document_type),
+      document_type: documentType,
+      custom_fields: this.filterCustomFieldsByDocumentType(document.custom_fields, documentType),
       document_date: this.normalizeDocumentDate(document.document_date, currentDoc.created),
       language: this.normalizeLanguage(document.language)
     };
+  }
+
+  // METADATA_CUSTOM_FIELD_DOCUMENT_TYPES ties a custom field to the document
+  // types it makes sense for, e.g. {"Amount": ["Bill", "Invoice"]}. A model
+  // asked for an amount finds one on nearly every page (wages on a tax form,
+  // a balance on a statement); the prompt alone does not keep those out.
+  // Fields without an entry are not restricted. With an entry, a document
+  // whose type is missing or not listed does not get the field.
+  static filterCustomFieldsByDocumentType(customFields, documentType) {
+    if (!customFields || typeof customFields !== 'object') {
+      return customFields;
+    }
+
+    const { customFieldDocumentTypes } = this.getRules();
+    if (customFieldDocumentTypes.size === 0) {
+      return customFields;
+    }
+
+    const typeLookup = this.normalizeForLookup(documentType);
+    const isAllowed = (field) => {
+      if (!field || typeof field !== 'object') {
+        return true;
+      }
+
+      const allowedTypes = customFieldDocumentTypes.get(this.normalizeForLookup(field.field_name));
+      if (!allowedTypes || allowedTypes.has(typeLookup)) {
+        return true;
+      }
+
+      console.log(`[DEBUG] Custom field "${field.field_name}" is not kept for document type "${documentType || 'none'}"`);
+      return false;
+    };
+
+    if (Array.isArray(customFields)) {
+      return customFields.filter(isAllowed);
+    }
+
+    return Object.fromEntries(Object.entries(customFields).filter(([, field]) => isAllowed(field)));
+  }
+
+  static buildCustomFieldDocumentTypes(rawMap = {}) {
+    const result = new Map();
+    for (const [fieldName, documentTypes] of Object.entries(rawMap)) {
+      const fieldLookup = this.normalizeForLookup(fieldName);
+      if (!fieldLookup || !Array.isArray(documentTypes)) {
+        continue;
+      }
+
+      result.set(fieldLookup, new Set(documentTypes.map((type) => this.normalizeForLookup(type)).filter(Boolean)));
+    }
+
+    return result;
   }
 
   static sanitizeDocumentContent(content) {
@@ -114,7 +168,8 @@ class MetadataNormalizationService {
       process.env.METADATA_TAG_DROP_EXACT || '',
       process.env.METADATA_TAG_DROP_PATTERNS || '',
       process.env.METADATA_KEEP_NUMERIC_TAGS || '',
-      process.env.METADATA_CORRESPONDENT_ALIASES || ''
+      process.env.METADATA_CORRESPONDENT_ALIASES || '',
+      process.env.METADATA_CUSTOM_FIELD_DOCUMENT_TYPES || ''
     ].join('||');
 
     if (this._rulesCache?.signature === signature) {
@@ -144,7 +199,10 @@ class MetadataNormalizationService {
       dropTagLookups: new Set(dropExactTags.map((tag) => this.normalizeForLookup(tag)).filter(Boolean)),
       dropTagPatterns: this.buildPatternList(dropPatterns, 'METADATA_TAG_DROP_PATTERNS'),
       keepNumericTagLookups: new Set(keepNumericTags.map((tag) => this.normalizeForLookup(tag)).filter(Boolean)),
-      correspondentAliases: this.buildAliasMap(correspondentAliases)
+      correspondentAliases: this.buildAliasMap(correspondentAliases),
+      customFieldDocumentTypes: this.buildCustomFieldDocumentTypes(
+        this.parseJsonObject(process.env.METADATA_CUSTOM_FIELD_DOCUMENT_TYPES, 'METADATA_CUSTOM_FIELD_DOCUMENT_TYPES')
+      )
     };
 
     this._rulesCache = { signature, value };
