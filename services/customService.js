@@ -347,7 +347,11 @@ class CustomOpenAIService {
         }
 
         const fieldName = typeof field.field_name === 'string' ? field.field_name.trim() : '';
-        const value = typeof field.value === 'string' ? field.value.trim() : '';
+        // Models return amounts as JSON numbers as often as strings; a number
+        // must take part in the vote instead of being dropped as "no value".
+        const value = typeof field.value === 'string'
+          ? field.value.trim()
+          : (typeof field.value === 'number' && Number.isFinite(field.value) ? String(field.value) : '');
         if (!fieldName || !value) {
           continue;
         }

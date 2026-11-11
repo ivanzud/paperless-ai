@@ -229,3 +229,36 @@ test('a document that still overflows the context is retried with a smaller chun
   assert.ok(requests[1].messages[1].content.length <= 2500);
   assert.equal(requests[1].max_tokens, 500);
 });
+
+test('chunk answers are merged by majority, including numeric custom field values', () => {
+  const merged = customService._mergeChunkResults([
+    {
+      title: 'Acme Invoice - March 2025', correspondent: 'Acme', tags: ['Invoice', 'Water'], document_type: 'Invoice',
+      document_date: '2025-03-04', language: 'en',
+      custom_fields: { 0: { field_name: 'Amount', value: 120.5 }, 1: { field_name: 'Due Date', value: '2025-03-31' } }
+    },
+    {
+      title: 'Acme Invoice - March 2025', correspondent: 'Acme', tags: ['Invoice'], document_type: 'Invoice',
+      document_date: '2025-03-04', language: 'en',
+      custom_fields: { 0: { field_name: 'amount', value: '120.5' }, 1: { field_name: 'Due Date', value: '' } }
+    },
+    {
+      title: 'Payment Terms', correspondent: '', tags: ['Terms', 'Invoice'], document_type: 'Letter',
+      document_date: '', language: 'en',
+      custom_fields: { 0: { field_name: 'Amount', value: 15 }, 1: { field_name: 'Due Date', value: null } }
+    },
+    null
+  ]);
+
+  assert.equal(merged.title, 'Acme Invoice - March 2025');
+  assert.equal(merged.correspondent, 'Acme');
+  assert.equal(merged.document_type, 'Invoice');
+  assert.equal(merged.document_date, '2025-03-04');
+  assert.deepEqual(merged.tags, ['Invoice', 'Terms', 'Water']);
+  assert.deepEqual(merged.custom_fields, {
+    0: { field_name: 'Amount', value: '120.5' },
+    1: { field_name: 'Due Date', value: '2025-03-31' }
+  });
+
+  assert.deepEqual(customService._mergeChunkResults([]).tags, []);
+});
