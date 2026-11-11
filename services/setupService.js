@@ -10,6 +10,11 @@ class SetupService {
   constructor() {
     this.envPath = path.join(process.cwd(), 'data', '.env');
     this.configured = null; // Variable to store the configuration status
+    this.pendingCheck = null;
+    this.failedAttempts = 0;
+    this.nextAttemptAt = 0;
+    this.retryBaseDelayMs = 5000;
+    this.retryMaxDelayMs = 60000;
   }
 
   async loadConfig() {
@@ -58,7 +63,9 @@ class SetupService {
       const response = await axios.get(`${url}/api/documents/`, {
         headers: {
           'Authorization': `Token ${token}`
-        }
+        },
+        params: { page_size: 1 },
+        timeout: 30000
       });
       return response.status === 200;
     } catch (error) {
@@ -292,18 +299,39 @@ class SetupService {
     }
   }
 
+  // Three outcomes:
+  //   true   the configuration exists and Paperless and the AI provider
+  //          answered at least once since start (cached),
+  //   false  there is no configuration yet and the setup page has to be
+  //          used (cached; saving the setup restarts the process),
+  //   false  the configuration exists but a backend did not answer. That
+  //          is never cached: the check is repeated on a later call, at
+  //          most once per back-off interval, and concurrent callers share
+  //          one check instead of each starting their own.
+  // Paperless being down when this process starts is the normal case after
+  // a host reboot, so giving up for good is not an option here.
   async isConfigured() {
     if (this.configured !== null) {
       return this.configured;
     }
 
-    const maxAttempts = 60; // 5 minutes = 300 seconds, attempting every 5 seconds = 60 attempts
-    const delayBetweenAttempts = 5000; // 5 seconds in milliseconds
-    let attempts = 0;
+    if (this.pendingCheck) {
+      return this.pendingCheck;
+    }
 
+    if (Date.now() < this.nextAttemptAt) {
+      return false;
+    }
+
+    this.pendingCheck = this.checkConfiguration().finally(() => {
+      this.pendingCheck = null;
+    });
+    return this.pendingCheck;
+  }
+
+  async checkConfiguration() {
     // First check if .env exists and if PAPERLESS_API_URL is set
     try {
-      // Check if .env file exists
       try {
         await fs.access(this.envPath, fs.constants.F_OK);
       } catch (err) {
@@ -312,65 +340,65 @@ class SetupService {
         return false;
       }
 
-      // Load and check for PAPERLESS_API_URL
       const config = await this.loadConfig();
       if (!config || !config.PAPERLESS_API_URL) {
         console.log('PAPERLESS_API_URL not set. Starting setup process...');
         this.configured = false;
         return false;
       }
+
+      await this.validateConfig(config);
+      if (this.failedAttempts > 0) {
+        console.log(`[INFO] Configuration check succeeded after ${this.failedAttempts} failed attempt(s)`);
+      }
+      this.failedAttempts = 0;
+      this.nextAttemptAt = 0;
+      this.configured = true;
+      return true;
     } catch (error) {
-      console.error('Error checking initial configuration:', error.message);
-      this.configured = false;
+      this.failedAttempts += 1;
+      const delay = this.retryDelayMs();
+      this.nextAttemptAt = Date.now() + delay;
+      console.error(
+        `Configuration check failed (attempt ${this.failedAttempts}): ${error.message}. `
+        + `Next attempt in ${Math.round(delay / 1000)} seconds.`
+      );
       return false;
     }
+  }
 
-    const attemptConfiguration = async () => {
-      try {
-        // Check data directory and create if needed
-        const dataDir = path.dirname(this.envPath);
-        try {
-          await fs.access(dataDir, fs.constants.F_OK);
-        } catch (err) {
-          console.log('Creating data directory...');
-          await fs.mkdir(dataDir, { recursive: true });
-        }
+  // 5 s, 10 s, 20 s, 40 s, then every 60 s.
+  retryDelayMs() {
+    const exponent = Math.min(Math.max(this.failedAttempts - 1, 0), 10);
+    return Math.min(this.retryBaseDelayMs * (2 ** exponent), this.retryMaxDelayMs);
+  }
 
-        // Load and validate full configuration
-        const config = await this.loadConfig();
-        if (!config) {
-          throw new Error('Failed to load configuration');
-        }
-
-        await this.validateConfig(config);
-        this.configured = true;
-        return true;
-      } catch (error) {
-        console.error('Configuration attempt failed:', error.message);
-        throw error;
-      }
-    };
-
-    // Only enter retry loop if we have PAPERLESS_API_URL set
-    while (attempts < maxAttempts) {
-      try {
-        const result = await attemptConfiguration();
-        return result;
-      } catch (error) {
-        attempts++;
-        if (attempts === maxAttempts) {
-          console.error('Max configuration attempts reached. Final error:', error.message);
-          this.configured = false;
-          return false;
-        }
-        console.log(`Retrying configuration (attempt ${attempts}/${maxAttempts}) in 5 seconds...`);
-        await new Promise(resolve => setTimeout(resolve, delayBetweenAttempts));
-      }
+  // 'ready', 'setup_required', or 'waiting' while the configuration exists
+  // but has not been confirmed against the backends yet.
+  getStatus() {
+    if (this.configured === true) {
+      return 'ready';
     }
+    return this.configured === false ? 'setup_required' : 'waiting';
+  }
 
-    this.configured = false;
-    return false;
+  // Resolves true once the configuration is confirmed, however long the
+  // backends take to come up, or false when there is nothing to wait for
+  // because the setup has not been done.
+  async waitUntilConfigured() {
+    for (;;) {
+      if (await this.isConfigured()) {
+        return true;
+      }
+      if (this.configured === false) {
+        return false;
+      }
+
+      const wait = Math.max(this.nextAttemptAt - Date.now(), 0) + 1;
+      await new Promise(resolve => setTimeout(resolve, wait));
+    }
   }
 }
 
 module.exports = new SetupService();
+module.exports.SetupService = SetupService;

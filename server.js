@@ -753,7 +753,10 @@ app.use((err, req, res, next) => {
 // Start scanning
 async function startScanning() {
   try {
-    const isConfigured = await setupService.isConfigured();
+    // Waits for as long as Paperless or the AI provider need to come up.
+    // Returning here used to leave the process running without ever
+    // scheduling a scan.
+    const isConfigured = await setupService.waitUntilConfigured();
     if (!isConfigured) {
       console.log(`Setup not completed. Visit http://your-machine-ip:${process.env.PAPERLESS_AI_PORT || 3000}/setup to complete setup.`);
       return;
@@ -761,8 +764,9 @@ async function startScanning() {
 
     const userId = await paperlessService.getOwnUserID();
     if (!userId) {
-      console.error('Failed to get own user ID. Abort scanning.');
-      return;
+      // Every scan looks the user up again, so this is not a reason to
+      // leave the schedule off.
+      console.warn('[WARN] Could not determine the Paperless user of the API token yet; scans will retry.');
     }
 
     console.log('Configured scan interval:', config.scanInterval);
