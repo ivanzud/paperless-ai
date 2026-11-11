@@ -80,27 +80,104 @@ test('keeps pipeline tags out of the allowed tag list', () => {
   }
 });
 
-function withTitleRules(tagAliases, fn) {
-  const previous = process.env.METADATA_TAG_ALIASES;
-  process.env.METADATA_TAG_ALIASES = JSON.stringify(tagAliases);
+function withEnv(values, fn) {
+  const previous = {};
+  for (const [key, value] of Object.entries(values)) {
+    previous[key] = process.env[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = typeof value === 'string' ? value : JSON.stringify(value);
+    }
+  }
   try {
     return fn();
   } finally {
-    if (previous === undefined) {
-      delete process.env.METADATA_TAG_ALIASES;
-    } else {
-      process.env.METADATA_TAG_ALIASES = previous;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
     }
   }
 }
 
+function silenceWarnings(t) {
+  const original = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args.join(' '));
+  t.after(() => {
+    console.warn = original;
+  });
+  return warnings;
+}
+
+const apply = (title) => MetadataNormalizationService.applyTitleReplacements(title);
+
 test('title replacement does not re-expand a name that is already canonical', () => {
-  withTitleRules({ Jane: 'Jane Doe', Doe: 'Jane Doe', 'JANE DOE': 'Jane Doe', 1234: 'Maple Court' }, () => {
-    const apply = (title) => MetadataNormalizationService.applyTitleReplacements(title);
+  withEnv({
+    METADATA_TAG_ALIASES: undefined,
+    METADATA_TITLE_REPLACEMENTS: { Jane: 'Jane Doe', Doe: 'Jane Doe', 'JANE DOE': 'Jane Doe', 1234: 'Maple Court' }
+  }, () => {
     assert.equal(apply('Phone Invoice 2025 - Jane Doe'), 'Phone Invoice 2025 - Jane Doe');
     assert.equal(apply('Phone Invoice 2025 - JANE DOE'), 'Phone Invoice 2025 - Jane Doe');
     assert.equal(apply('401(k) Statement - Jane'), '401(k) Statement - Jane Doe');
     assert.equal(apply('Water Bill - 1234'), 'Water Bill - Maple Court');
     assert.equal(apply('Account 12341'), 'Account 12341');
+  });
+});
+
+test('tag aliases are not applied to titles', () => {
+  withEnv({
+    METADATA_TAG_ALIASES: { 1234: 'Maple Court', Doe: 'Jane Doe', JD: 'Jane Doe', Acme: 'Acme Financial' },
+    METADATA_TITLE_REPLACEMENTS: undefined
+  }, () => {
+    for (const title of [
+      'Payment $1234.00 - Example Bank',
+      'Invoice #1234 - Acme',
+      'John Doe - Medical',
+      'JD Holdings Invoice',
+      'Acme Life Insurance Annual Statement 2025'
+    ]) {
+      assert.equal(apply(title), title);
+      assert.equal(MetadataNormalizationService.normalizeTitle(title, 'Scan'), title);
+    }
+    // The aliases still do their job on tags.
+    assert.deepEqual(
+      MetadataNormalizationService.normalizeTags(['1234', 'JD', 'Acme'], 4),
+      ['Maple Court', 'Jane Doe', 'Acme Financial']
+    );
+  });
+});
+
+test('title replacements leave amounts, identifiers and parts of other tokens alone', () => {
+  withEnv({
+    METADATA_TAG_ALIASES: undefined,
+    METADATA_TITLE_REPLACEMENTS: { 1234: 'Maple Court', '1234 Maple Court Dr': 'Maple Court', Jane: 'Jane Doe', 'ACME CORP': 'Acme' }
+  }, () => {
+    const unchanged = [
+      'Payment $1234.00 - Example Bank',
+      'Payment 1234.50 - Example Bank',
+      'Invoice #1234 - Example Store',
+      'Credit Card Statement ending 1234 - Example Bank',
+      'Order 1234-1',
+      'Order 7-1234',
+      'Check 1234',
+      'Form 1234 2025',
+      'Ref 12/1234',
+      'Mail from jane@example.com',
+      'Mary-Jane Roe - Medical',
+      'Janet Roe - Medical'
+    ];
+    for (const title of unchanged) {
+      assert.equal(apply(title), title);
+    }
+
+    assert.equal(apply('Water Bill 2025 - 1234'), 'Water Bill 2025 - Maple Court');
+    assert.equal(apply('1234 - Water Bill 2025'), 'Maple Court - Water Bill 2025');
+    assert.equal(apply('Water Bill - 1234 Maple Court Dr'), 'Water Bill - Maple Court');
+    assert.equal(apply('Statement - Jane, 2025'), 'Statement - Jane Doe, 2025');
+    assert.equal(apply('Invoice (ACME CORP)'), 'Invoice (Acme)');
   });
 });

@@ -134,10 +134,11 @@ class MetadataNormalizationService {
 
     const value = {
       tagAliases: this.buildAliasMap(tagAliases),
-      titleReplacements: this.buildTitleReplacements({
-        ...tagAliases,
-        ...titleReplacements
-      }),
+      // Tag aliases are not applied to titles: an alias is written for a tag
+      // that consists of nothing else ("1234" -> a property tag), while in a
+      // title the same characters are an amount, an account ending or part
+      // of somebody else's name.
+      titleReplacements: this.buildTitleReplacements(titleReplacements),
       propertyTagLookups: new Set(propertyTags.map((tag) => this.normalizeForLookup(tag))),
       dropAddressTags: (process.env.METADATA_DROP_ADDRESS_TAGS || 'no').toLowerCase() === 'yes',
       dropTagLookups: new Set(dropExactTags.map((tag) => this.normalizeForLookup(tag)).filter(Boolean)),
@@ -276,7 +277,7 @@ class MetadataNormalizationService {
       .join('|');
     return {
       replacements,
-      regex: new RegExp(`(?<![A-Za-z0-9])(?:${alternation})(?![A-Za-z0-9])`, 'gi')
+      regex: new RegExp(`(?<![A-Za-z0-9$#@/_.,:-])(?:${alternation})(?![A-Za-z0-9@/_-]|[.,:]\\d)`, 'gi')
     };
   }
 
@@ -332,6 +333,9 @@ class MetadataNormalizationService {
       }
 
       const lowerPart = part.toLowerCase();
+    // A source only counts as a whole token: not inside a longer word or
+    // number, and not glued to the characters that make it part of an amount,
+    // an identifier, a path or an address ("$1234.00", "#1234", "1234-1").
       if (/^[A-Z]{2,3}$/.test(part) && !minorWords.has(lowerPart)) {
         return part;
       }
@@ -375,7 +379,20 @@ class MetadataNormalizationService {
 
     return value.replace(
       titleReplacements.regex,
-      (match) => titleReplacements.replacements.get(match.toLowerCase()) || match
+      (match, offset, whole) => {
+        // A bare number in a title is nearly always an identifier ("Check
+        // 1234", "Form 1234"). It is only replaced when it is a complete
+        // " - " segment of the title, where it stands for the subject.
+        if (/^\d+$/.test(match)) {
+          const before = whole.slice(0, offset);
+          const after = whole.slice(offset + match.length);
+          if (!/(?:^|\s[-–—]\s)$/.test(before) || !/^(?:$|\s[-–—]\s)/.test(after)) {
+            return match;
+          }
+        }
+
+        return titleReplacements.replacements.get(match.toLowerCase()) || match;
+      }
     );
   }
 
