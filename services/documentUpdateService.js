@@ -1,5 +1,28 @@
 "use strict";
 
+// Everything a processing run may overwrite in Paperless. Stored before the
+// update so that a wrong title, date, type or amount can be put back by hand:
+// the values are exactly what a PATCH to /api/documents/<id>/ accepts.
+const SNAPSHOT_FIELDS = [
+  "title",
+  "created",
+  "correspondent",
+  "document_type",
+  "storage_path",
+  "tags",
+  "custom_fields",
+];
+
+function buildPreviousValues(originalData = {}) {
+  const snapshot = {};
+  for (const field of SNAPSHOT_FIELDS) {
+    if (originalData[field] !== undefined) {
+      snapshot[field] = originalData[field];
+    }
+  }
+  return snapshot;
+}
+
 async function saveAnalyzedDocumentChanges({
   documentModel,
   paperlessService,
@@ -23,6 +46,7 @@ async function saveAnalyzedDocumentChanges({
       originalCorrespondent,
       originalTitle,
       null,
+      buildPreviousValues(originalData),
     );
 
     const updatedDocument = await paperlessService.updateDocument(
@@ -97,6 +121,7 @@ async function saveManualDocumentChanges({
 }
 
 module.exports = {
+  buildPreviousValues,
   saveAnalyzedDocumentChanges,
   saveManualDocumentChanges,
 };

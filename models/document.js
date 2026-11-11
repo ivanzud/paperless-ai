@@ -93,6 +93,8 @@ function ensureColumn(tableName, columnName, columnDef) {
 
 ensureColumn('history_documents', 'notes', 'TEXT');
 ensureColumn('original_documents', 'notes', 'TEXT');
+// JSON snapshot of every field a processing run may overwrite.
+ensureColumn('original_documents', 'previous_values', 'TEXT');
 
 
 // Prepare statements for better performance
@@ -247,13 +249,14 @@ module.exports = {
     }
   },
 
-  async saveOriginalData(documentId, tags, correspondent, title, notes = null) {
+  async saveOriginalData(documentId, tags, correspondent, title, notes = null, previousValues = null) {
     try {
       const tagsString = JSON.stringify(tags); // Konvertiere Array zu String
+      const previousValuesString = previousValues ? JSON.stringify(previousValues) : null;
       const result = db.prepare(`
-        INSERT INTO original_documents (document_id, title, tags, correspondent, notes)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(documentId, title, tagsString, correspondent, notes);
+        INSERT INTO original_documents (document_id, title, tags, correspondent, notes, previous_values)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(documentId, title, tagsString, correspondent, notes, previousValuesString);
       if (result.changes > 0) {
         console.log(`[DEBUG] Original data for document ${title} saved`);
         return true;

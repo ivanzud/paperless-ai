@@ -249,3 +249,40 @@ test("successful manual update records processed state after both PATCH operatio
     "complete",
   ]);
 });
+
+test("the values a run may overwrite are stored before the update", async () => {
+  const fixture = createFixture();
+  fixture.input.originalData = {
+    id: 42,
+    title: "Original title",
+    created: "2025-03-04",
+    correspondent: 8,
+    document_type: 2,
+    storage_path: null,
+    tags: [3, 5],
+    custom_fields: [{ field: 1, value: "45.00" }],
+    checksum: "checksum-42",
+    content: "text that must not be copied",
+  };
+
+  await saveAnalyzedDocumentChanges(fixture.input);
+
+  assert.equal(fixture.calls[0][0], "saveOriginalData");
+  assert.equal(fixture.calls[1][0], "updateDocument");
+  assert.deepEqual(fixture.calls[0].slice(1), [
+    42,
+    [3, 5],
+    8,
+    "Original title",
+    null,
+    {
+      title: "Original title",
+      created: "2025-03-04",
+      correspondent: 8,
+      document_type: 2,
+      storage_path: null,
+      tags: [3, 5],
+      custom_fields: [{ field: 1, value: "45.00" }],
+    },
+  ]);
+});
