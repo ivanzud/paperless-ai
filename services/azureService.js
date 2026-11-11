@@ -3,6 +3,7 @@ const {
   calculateTotalPromptTokens,
   truncateToTokenLimit,
   writePromptToFile,
+  writeResponseToFile,
   buildTemperatureOption
 } = require('./serviceUtils');
 const OpenAI = require('openai');
@@ -210,9 +211,7 @@ class AzureOpenAIService {
         parsedResponse = JSON.parse(jsonContent);
         this._normalizeNotesField(parsedResponse);
         //write to file and append to the file (txt)
-        fs.appendFile('./logs/response.txt', jsonContent, (err) => {
-          if (err) throw err;
-        });
+        await writeResponseToFile(jsonContent);
       } catch (error) {
         console.error('Failed to parse JSON response:', error);
         throw new Error('Invalid JSON response from API');

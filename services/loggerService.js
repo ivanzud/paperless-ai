@@ -2,6 +2,7 @@ const fs = require('fs');
 const util = require('util');
 const path = require('path');
 const { sanitizeLogArguments } = require('../utils/logSanitizer');
+const { shouldLog } = require('../utils/logLevel');
 
 class Logger {
     constructor(options = {}) {
@@ -189,6 +190,7 @@ class Logger {
 
     overrideConsoleMethods() {
         console.log = (...args) => {
+            if (!shouldLog('log', args)) return;
             const safeArgs = sanitizeLogArguments(args);
             const logMessage = this.formatLogMessage('info', safeArgs);
             this.originalConsole.log(...safeArgs);
@@ -196,6 +198,7 @@ class Logger {
         };
 
         console.error = (...args) => {
+            if (!shouldLog('error', args)) return;
             const safeArgs = sanitizeLogArguments(args);
             const logMessage = this.formatLogMessage('error', safeArgs);
             this.originalConsole.error(...safeArgs);
@@ -203,6 +206,7 @@ class Logger {
         };
 
         console.warn = (...args) => {
+            if (!shouldLog('warn', args)) return;
             const safeArgs = sanitizeLogArguments(args);
             const logMessage = this.formatLogMessage('warn', safeArgs);
             this.originalConsole.warn(...safeArgs);
@@ -210,6 +214,7 @@ class Logger {
         };
 
         console.info = (...args) => {
+            if (!shouldLog('info', args)) return;
             const safeArgs = sanitizeLogArguments(args);
             const logMessage = this.formatLogMessage('info', safeArgs);
             this.originalConsole.info(...safeArgs);
@@ -217,6 +222,7 @@ class Logger {
         };
 
         console.debug = (...args) => {
+            if (!shouldLog('debug', args)) return;
             const safeArgs = sanitizeLogArguments(args);
             const logMessage = this.formatLogMessage('debug', safeArgs);
             this.originalConsole.debug(...safeArgs);

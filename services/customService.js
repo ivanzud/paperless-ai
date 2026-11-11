@@ -4,6 +4,7 @@ const {
   truncateToTokenLimit,
   truncateToEstimatedTokens,
   writePromptToFile,
+  writeResponseToFile,
   buildTemperatureOption
 } = require('./serviceUtils');
 const OpenAI = require('openai');
@@ -496,13 +497,9 @@ class CustomOpenAIService {
       throw new Error('Invalid JSON response from API');
     }
 
-    // Kept out of the parse block: a full disk or a missing logs directory is
-    // not an invalid model response and must not fail the document.
-    try {
-      await fs.appendFile('./logs/response.txt', JSON.stringify(parsedResponse));
-    } catch (error) {
-      console.warn('[WARNING] Could not write the response log:', error.message);
-    }
+    // Kept out of the parse block: a problem with the debug file is not an
+    // invalid model response. Only written when LOG_LEVEL=debug.
+    await writeResponseToFile(parsedResponse);
 
     return {
       document: this._sanitizeAnalysisResponse(parsedResponse),

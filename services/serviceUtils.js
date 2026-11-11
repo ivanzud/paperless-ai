@@ -2,6 +2,7 @@ const tiktoken = require('tiktoken');
 const fs = require('fs').promises;
 const path = require('path');
 const { TextDecoder } = require('util');
+const { isDebugEnabled } = require('../utils/logLevel');
 
 function normalizeTextInput(value) {
     if (typeof value === 'string') {
@@ -403,33 +404,47 @@ async function truncateToTokenLimit(text, maxTokens, model = process.env.OPENAI_
     }
 }
 
-// Write prompt and content to a file with size management
-async function writePromptToFile(systemPrompt, truncatedContent, filePath = './logs/prompt.txt', maxSize = 10 * 1024 * 1024) {
+const DEBUG_FILE_MAX_SIZE = 10 * 1024 * 1024;
+
+// Prompts and model responses contain the text of the processed documents.
+// They are only kept on disk when LOG_LEVEL=debug, and each file starts
+// over once it reaches its size limit. Never throws: a full disk or a
+// missing logs directory must not fail the document.
+async function appendToDebugFile(filePath, content, maxSize = DEBUG_FILE_MAX_SIZE) {
+    if (!isDebugEnabled()) {
+        return false;
+    }
     try {
-        // Ensure the logs directory exists
         await fs.mkdir(path.dirname(filePath), { recursive: true });
-        
-        // Check file size and manage it
         try {
             const stats = await fs.stat(filePath);
-            if (stats.size > maxSize) {
-                await fs.unlink(filePath); // Delete the file if it exceeds max size
-                console.log(`[DEBUG] Cleared log file ${filePath} due to size limit`);
+            if (stats.size + Buffer.byteLength(content) > maxSize) {
+                await fs.unlink(filePath);
             }
         } catch (error) {
             if (error.code !== 'ENOENT') {
-                console.warn('[WARNING] Error checking file size:', error);
+                throw error;
             }
         }
-
-        // Write the content with timestamp
-        const timestamp = new Date().toISOString();
-        const content = `\n=== ${timestamp} ===\nSYSTEM PROMPT:\n${systemPrompt}\n\nUSER CONTENT:\n${truncatedContent}\n\n`;
-        
         await fs.appendFile(filePath, content);
+        return true;
     } catch (error) {
-        console.error('[ERROR] Error writing to file:', error);
+        console.warn(`[WARNING] Could not write ${filePath}:`, error.message);
+        return false;
     }
+}
+
+// Write prompt and content to a file with size management
+async function writePromptToFile(systemPrompt, truncatedContent, filePath = './logs/prompt.txt', maxSize = DEBUG_FILE_MAX_SIZE) {
+    const timestamp = new Date().toISOString();
+    const content = `\n=== ${timestamp} ===\nSYSTEM PROMPT:\n${systemPrompt}\n\nUSER CONTENT:\n${truncatedContent}\n\n`;
+    return appendToDebugFile(filePath, content, maxSize);
+}
+
+// Write a model response to a file with the same size management
+async function writeResponseToFile(response, filePath = './logs/response.txt', maxSize = DEBUG_FILE_MAX_SIZE) {
+    const text = typeof response === 'string' ? response : JSON.stringify(response);
+    return appendToDebugFile(filePath, `${text}\n`, maxSize);
 }
 
 module.exports = {
@@ -439,6 +454,7 @@ module.exports = {
     calculateTotalPromptTokens,
     truncateToTokenLimit,
     writePromptToFile,
+    writeResponseToFile,
     modelSupportsCustomTemperature,
     buildTemperatureOption,
     isLongTextCustomField,

@@ -3,6 +3,7 @@ const {
     calculateTotalPromptTokens, 
     truncateToTokenLimit, 
     writePromptToFile,
+    writeResponseToFile,
     buildTemperatureOption
 } = require('./serviceUtils');
 const axios = require('axios');
@@ -98,9 +99,7 @@ class ManualService {
         try {
             parsedResponse = JSON.parse(jsonContent);
             this._normalizeNotesField(parsedResponse);
-            fs.appendFile('./logs/response.txt', jsonContent, (err) => {
-                if (err) throw err;
-            });
+            await writeResponseToFile(jsonContent);
         } catch (error) {
             console.error('Failed to parse JSON response:', error);
             throw new Error('Invalid JSON response from API');
@@ -147,9 +146,7 @@ class ManualService {
         try {
             parsedResponse = JSON.parse(jsonContent);
             this._normalizeNotesField(parsedResponse);
-            fs.appendFile('./logs/response.txt', jsonContent, (err) => {
-                if (err) throw err;
-            });
+            await writeResponseToFile(jsonContent);
         } catch (error) {
             console.error('Failed to parse JSON response:', error);
             throw new Error('Invalid JSON response from API');

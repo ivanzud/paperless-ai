@@ -157,6 +157,21 @@ test('an answer cut off at the token limit is reported as cut off, not as invali
   );
 });
 
+test('the model answer is only written to the response log at the debug level', async (t) => {
+  useBackend(t, () => completion(JSON.stringify(ANSWER)));
+  const responseLog = path.join(workDir, 'logs', 'response.txt');
+  fs.rmSync(path.join(workDir, 'logs'), { recursive: true, force: true });
+  t.after(() => fs.rmSync(path.join(workDir, 'logs'), { recursive: true, force: true }));
+
+  withEnv(t, { LOG_LEVEL: undefined });
+  await customService._analyzeSingleChunk('system', 'text', 'example/local-model', 'now', 500);
+  assert.equal(fs.existsSync(responseLog), false);
+
+  process.env.LOG_LEVEL = 'debug';
+  await customService._analyzeSingleChunk('system', 'text', 'example/local-model', 'now', 500);
+  assert.equal(fs.readFileSync(responseLog, 'utf8'), `${JSON.stringify(ANSWER)}\n`);
+});
+
 test('a response log that cannot be written does not fail the document', async (t) => {
   useBackend(t, () => completion(JSON.stringify(ANSWER)));
   // Make ./logs a file so that nothing can be written below it.

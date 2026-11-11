@@ -206,7 +206,9 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
 
     const aiService = AIServiceFactory.getService();
     const analysis = await aiService.analyzeDocument(content, existingTags, existingCorrespondentList, existingDocumentTypesList, doc.id);
-    console.log('Repsonse from AI service:', analysis);
+    // The full answer contains details of the document; debug level only.
+    console.log('[DEBUG] Response from AI service:', analysis);
+    console.log(`[INFO] Document ${doc.id} analyzed (${analysis.metrics?.totalTokens ?? 0} tokens)`);
     if (analysis.warnings?.length) {
       console.warn(`[WARNING] Document ${doc.id} analyzed with partial chunk failures:`, analysis.warnings);
     }

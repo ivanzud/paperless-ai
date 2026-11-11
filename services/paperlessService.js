@@ -1406,7 +1406,7 @@ class PaperlessService {
       if (results.length > 1) {
           console.log(`[DEBUG] Multiple correspondents found:`);
           results.forEach(c => {
-              console.log(`- ID: ${c.id}, Name: ${c.name}`);
+              console.log(`[DEBUG] - ID: ${c.id}, Name: ${c.name}`);
           });
           return results;
       }

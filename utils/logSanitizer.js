@@ -1,5 +1,7 @@
 'use strict';
 
+const { shouldLog } = require('./logLevel');
+
 const REDACTED = '[REDACTED]';
 
 function isSensitiveKey(key) {
@@ -145,7 +147,12 @@ function installSafeConsole(target = console) {
       continue;
     }
     originals[level] = target[level];
-    target[level] = (...args) => originals[level].apply(target, sanitizeLogArguments(args));
+    target[level] = (...args) => {
+      if (!shouldLog(level, args)) {
+        return;
+      }
+      originals[level].apply(target, sanitizeLogArguments(args));
+    };
   }
 
   Object.defineProperty(target, SAFE_CONSOLE_MARKER, {
