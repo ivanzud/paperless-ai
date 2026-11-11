@@ -1791,6 +1791,68 @@ async getOrCreateDocumentType(name, options = {}) {
   }
 
 
+  // Paperless validates the whole payload at once: one custom field value it
+  // does not like turns the entire update into a 400 and the title, tags and
+  // date are lost with it. When the 400 is about custom_fields, the offending
+  // entries are taken out and the rest is sent again.
+  async patchDocumentMetadata(documentId, updateData, currentDoc = {}) {
+    try {
+      return await this.client.patch(`/documents/${documentId}/`, updateData);
+    } catch (error) {
+      const fieldErrors = error?.response?.status === 400 ? error.response?.data?.custom_fields : undefined;
+      if (fieldErrors === undefined || !Array.isArray(updateData.custom_fields)) {
+        throw error;
+      }
+
+      const currentFieldValues = new Map(
+        (Array.isArray(currentDoc?.custom_fields) ? currentDoc.custom_fields : [])
+          .filter((entry) => entry && entry.field !== undefined && entry.field !== null)
+          .map((entry) => [Number(entry.field), entry.value])
+      );
+      const isRejected = (entryError) => Boolean(entryError)
+        && (typeof entryError !== 'object' || Object.keys(entryError).length > 0);
+      const perEntry = Array.isArray(fieldErrors)
+        && fieldErrors.length === updateData.custom_fields.length
+        && fieldErrors.every((entryError) => entryError === null || (typeof entryError === 'object' && !Array.isArray(entryError)));
+
+      const retained = [];
+      const dropped = [];
+      updateData.custom_fields.forEach((entry, index) => {
+        // Without a per-entry error list there is no telling which value was
+        // refused, so every value that would change the document is dropped.
+        const unchanged = currentFieldValues.has(Number(entry.field))
+          && JSON.stringify(currentFieldValues.get(Number(entry.field))) === JSON.stringify(entry.value);
+        const rejected = perEntry ? isRejected(fieldErrors[index]) : !unchanged;
+        if (!rejected) {
+          retained.push(entry);
+          return;
+        }
+
+        dropped.push(entry.field);
+        if (currentFieldValues.has(Number(entry.field)) && !unchanged) {
+          retained.push({ field: entry.field, value: currentFieldValues.get(Number(entry.field)) });
+        }
+      });
+
+      if (dropped.length === 0) {
+        throw error;
+      }
+
+      console.warn(
+        `[WARN] Paperless rejected custom field(s) ${dropped.join(', ')} for document ${documentId}; retrying without them:`,
+        JSON.stringify(fieldErrors).slice(0, 300)
+      );
+
+      if (retained.length > 0) {
+        updateData.custom_fields = retained;
+      } else {
+        delete updateData.custom_fields;
+      }
+
+      return await this.client.patch(`/documents/${documentId}/`, updateData);
+    }
+  }
+
   async updateDocument(documentId, updates) {
     this.initialize();
     if (!this.client) {
@@ -1911,6 +1973,17 @@ async getOrCreateDocumentType(name, options = {}) {
 
       if (Array.isArray(updateData.custom_fields)) {
         const sanitizedCustomFields = [];
+        // The payload replaces the whole custom field list, so it also carries
+        // the values the document already has. Those were accepted by
+        // Paperless before and are passed through untouched; only new values
+        // are validated. A new value that does not survive validation must
+        // not delete the stored one either.
+        const currentFieldValues = new Map(
+          (Array.isArray(currentDoc?.custom_fields) ? currentDoc.custom_fields : [])
+            .filter((entry) => entry && hasValue(entry.field))
+            .map((entry) => [Number(entry.field), entry.value])
+        );
+        const sameValue = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
         for (const [index, customField] of updateData.custom_fields.entries()) {
           if (!customField || typeof customField !== 'object' || Array.isArray(customField)) {
@@ -1918,8 +1991,22 @@ async getOrCreateDocumentType(name, options = {}) {
             continue;
           }
 
+          const fieldId = Number(customField.field);
+          const hasCurrentValue = hasValue(customField.field) && currentFieldValues.has(fieldId);
+          const keepCurrentValue = () => {
+            sanitizedCustomFields.push({ field: customField.field, value: currentFieldValues.get(fieldId) });
+          };
+
+          if (hasCurrentValue && sameValue(currentFieldValues.get(fieldId), customField.value)) {
+            keepCurrentValue();
+            continue;
+          }
+
           if (!hasValue(customField.field) || !hasValue(customField.value)) {
             console.warn(`[WARN] Skipping incomplete custom field metadata at index ${index} for document ${documentId}`);
+            if (hasCurrentValue) {
+              keepCurrentValue();
+            }
             continue;
           }
 
@@ -1927,7 +2014,10 @@ async getOrCreateDocumentType(name, options = {}) {
           let normalizedValue = normalizeCustomFieldValueForPaperless(customField.value, fieldDetails || {});
           if (typeof normalizedValue === 'string') {
             if (!normalizedValue) {
-              console.warn(`[WARN] Skipping empty custom field value at index ${index} for document ${documentId}`);
+              console.warn(`[WARN] Skipping unusable value for custom field ${customField.field} on document ${documentId}`);
+              if (hasCurrentValue) {
+                keepCurrentValue();
+              }
               continue;
             }
           }
@@ -1979,8 +2069,8 @@ async getOrCreateDocumentType(name, options = {}) {
       }
       
       console.log('[DEBUG] Final update data:', updateData);
-      await this.client.patch(`/documents/${documentId}/`, updateData);
-      console.log(`[SUCCESS] Updated document ${documentId} with:`, updateData);
+      await this.patchDocumentMetadata(documentId, updateData, currentDoc);
+      console.log(`[SUCCESS] Updated document ${documentId} (${Object.keys(updateData).join(', ')})`);
       return await this.getDocument(documentId);
     } catch (error) {
       console.error(`[ERROR] updating document ${documentId}:`, toSafeError(error));
