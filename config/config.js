@@ -42,6 +42,8 @@ const limitFunctions = {
   activateCustomFields: parseEnvBoolean(process.env.ACTIVATE_CUSTOM_FIELDS, 'yes')
 };
 
+const { buildLanguageRule } = require('../services/promptAssembly');
+
 // Initialize AI restrictions with defaults
 const aiRestrictions = {
   restrictToExistingTags: parseEnvBoolean(process.env.RESTRICT_TO_EXISTING_TAGS, 'no'),
@@ -154,7 +156,7 @@ module.exports = {
     "language": "en/de/es/...",
     "notes": "Optional short note about the document"
   }`,
-  mustHavePrompt: `  Return the result EXCLUSIVELY as a JSON object. The Tags, Title and Document_Type MUST be in the language that is used in the document.:
+  mustHavePrompt: `  Return the result EXCLUSIVELY as a JSON object. ${buildLanguageRule(aiRestrictions)}
   If lists of existing tags/correspondents/document types are provided, copy names with exact spelling from those lists.
   Never invent close variants, alternate spellings, or typo versions of existing values.
   IMPORTANT: The custom_fields are optional and can be left out if not needed, only try to fill out the values if you find a matching information in the document.

@@ -6,6 +6,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 const RestrictionPromptService = require('./restrictionPromptService');
+const { customFieldValueHint } = require('./promptAssembly');
 
 class GeminiService {
   constructor() {
@@ -63,7 +64,7 @@ class GeminiService {
       customFieldsObj.custom_fields.forEach((field, index) => {
         customFieldsTemplate[index] = {
           field_name: field.value,
-          value: "Fill in the value based on your analysis"
+          value: customFieldValueHint(field)
         };
       });
 

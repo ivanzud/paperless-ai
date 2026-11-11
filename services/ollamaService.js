@@ -12,6 +12,11 @@ const paperlessService = require('./paperlessService');
 const os = require('os');
 const OpenAI = require('openai');
 const RestrictionPromptService = require('./restrictionPromptService');
+const {
+  buildCorrespondentInstruction,
+  customFieldValueHint,
+  readSystemPrompt
+} = require('./promptAssembly');
 const { ensureThumbnailCached } = require('./thumbnailCache');
 
 /**
@@ -280,7 +285,7 @@ class OllamaService {
                 customFieldsObj.custom_fields.forEach((field, index) => {
                     customFieldsTemplate[index] = {
                         field_name: field.value,
-                        value: "Fill in the value based on your analysis"
+                        value: customFieldValueHint(field)
                     };
                 });
 
@@ -444,7 +449,7 @@ class OllamaService {
         customFieldsObj.custom_fields.forEach((field, index) => {
             customFieldsTemplate[index] = {
                 field_name: field.value,
-                value: "Fill in the value based on your analysis"
+                value: customFieldValueHint(field)
             };
         });
 
@@ -454,14 +459,6 @@ class OllamaService {
             .map(line => '    ' + line)  // Add proper indentation
             .join('\n');
 
-        // Build correspondent matching instruction
-        const correspondentInstruction = (config.limitFunctions?.activateCorrespondents !== 'no' && correspondentList && correspondentList.length > 0)
-            ? `IMPORTANT: The following correspondents already exist in the system: ${correspondentList.join(', ')}\nWhen identifying the correspondent, prefer an existing one if the document's sender is a close match. Use EXACTLY that existing name (e.g. if the document shows "MediaMarkt Saturn Media GmbH" and "MediaMarkt" is in the list, return "MediaMarkt"). Only return a completely new name if none of the existing correspondents are a reasonable match.`
-            : '';
-
-        const baseMustHavePrompt = config.mustHavePrompt
-            .replace('%CUSTOMFIELDS%', customFieldsStr)
-            .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
         const existingDataPrompt = RestrictionPromptService.buildExistingDataPrompt(
             existingTags,
             correspondentList,
@@ -469,7 +466,17 @@ class OllamaService {
             config
         );
 
-        systemPrompt = [existingDataPrompt, process.env.SYSTEM_PROMPT, baseMustHavePrompt]
+        // Build correspondent matching instruction. The existing-data block
+        // already lists the names, so they are not repeated.
+        const correspondentInstruction = buildCorrespondentInstruction(config, correspondentList, {
+            listAlreadyShown: Boolean(existingDataPrompt)
+        });
+
+        const baseMustHavePrompt = config.mustHavePrompt
+            .replace('%CUSTOMFIELDS%', customFieldsStr)
+            .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+
+        systemPrompt = [existingDataPrompt, readSystemPrompt(), baseMustHavePrompt]
             .filter(Boolean)
             .join('\n\n');
         promptTags = '';
@@ -560,7 +567,7 @@ class OllamaService {
         customFieldsObj.custom_fields.forEach((field, index) => {
             customFieldsTemplate[index] = {
                 field_name: field.value,
-                value: "Fill in the value based on your analysis"
+                value: customFieldValueHint(field)
             };
         });
 

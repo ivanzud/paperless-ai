@@ -12,6 +12,11 @@ const fs = require('fs').promises;
 const path = require('path');
 const { model } = require('./ollamaService');
 const RestrictionPromptService = require('./restrictionPromptService');
+const {
+  buildCorrespondentInstruction,
+  customFieldValueHint,
+  readSystemPrompt
+} = require('./promptAssembly');
 const { ensureThumbnailCached } = require('./thumbnailCache');
 
 class OpenAIService {
@@ -196,7 +201,7 @@ class OpenAIService {
       customFieldsObj.custom_fields.forEach((field, index) => {
         customFieldsTemplate[index] = {
           field_name: field.value,
-          value: "Fill in the value based on your analysis"
+          value: customFieldValueHint(field)
         };
       });
 
@@ -207,20 +212,22 @@ class OpenAIService {
         .join('\n');
 
       // Get system prompt and model
-      const correspondentInstruction = (config.limitFunctions?.activateCorrespondents !== 'no' && existingCorrespondentList && existingCorrespondentList.length > 0)
-        ? `IMPORTANT: The following correspondents already exist in the system: ${Array.isArray(existingCorrespondentList) ? existingCorrespondentList.join(', ') : existingCorrespondentList}\nWhen identifying the correspondent, prefer an existing one if the document's sender is a close match. Use EXACTLY that existing name (e.g. if the document shows "MediaMarkt Saturn Media GmbH" and "MediaMarkt" is in the list, return "MediaMarkt"). Only return a completely new name if none of the existing correspondents are a reasonable match.`
-        : '';
-      const mustHavePrompt = config.mustHavePrompt
-        .replace('%CUSTOMFIELDS%', customFieldsStr)
-        .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
-
       const existingDataPrompt = RestrictionPromptService.buildExistingDataPrompt(
         existingTags,
         existingCorrespondentList,
         existingDocumentTypesList,
         config
       );
-      systemPrompt = [existingDataPrompt, process.env.SYSTEM_PROMPT, mustHavePrompt]
+      // The existing-data block already lists the correspondents, except when
+      // a custom prompt replaces everything in front of the JSON format.
+      const correspondentInstruction = buildCorrespondentInstruction(config, existingCorrespondentList, {
+        listAlreadyShown: Boolean(existingDataPrompt) && !customPrompt
+      });
+      const mustHavePrompt = config.mustHavePrompt
+        .replace('%CUSTOMFIELDS%', customFieldsStr)
+        .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+
+      systemPrompt = [existingDataPrompt, readSystemPrompt(), mustHavePrompt]
         .filter(Boolean)
         .join('\n\n');
       promptTags = '';

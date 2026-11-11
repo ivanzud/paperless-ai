@@ -13,6 +13,11 @@ const paperlessService = require('./paperlessService');
 const fs = require('fs').promises;
 const path = require('path');
 const RestrictionPromptService = require('./restrictionPromptService');
+const {
+  buildCorrespondentInstruction,
+  customFieldValueHint,
+  readSystemPrompt
+} = require('./promptAssembly');
 const { ensureThumbnailCached } = require('./thumbnailCache');
 
 class CustomOpenAIService {
@@ -556,7 +561,7 @@ class CustomOpenAIService {
       customFieldsObj.custom_fields.forEach((field, index) => {
         customFieldsTemplate[index] = {
           field_name: field.value,
-          value: "Fill in the value based on your analysis"
+          value: customFieldValueHint(field)
         };
       });
 
@@ -567,16 +572,6 @@ class CustomOpenAIService {
         .join('\n');
 
       // Get system prompt based on configuration
-      const correspondentInstruction = (config.limitFunctions?.activateCorrespondents !== 'no' && existingCorrespondentList && existingCorrespondentList.length > 0)
-        ? `IMPORTANT: The following correspondents already exist in the system: ${Array.isArray(existingCorrespondentList) ? existingCorrespondentList.join(', ') : existingCorrespondentList}\nWhen identifying the correspondent, prefer an existing one if the document's sender is a close match. Use EXACTLY that existing name (e.g. if the document shows "MediaMarkt Saturn Media GmbH" and "MediaMarkt" is in the list, return "MediaMarkt"). Only return a completely new name if none of the existing correspondents are a reasonable match.`
-        : '';
-      // Build the prompt without touching config.mustHavePrompt: replacing its
-      // placeholders in place froze the first document's correspondent list
-      // into every later prompt. The existing-data block is included whatever
-      // the restrictions are, so a restricted run still sees the allowed names.
-      const mustHavePrompt = config.mustHavePrompt
-        .replace('%CUSTOMFIELDS%', customFieldsStr)
-        .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
       // A long tag list leads small models to attach plausible-looking but
       // wrong tags from it (unrelated tags it saw in the list), so it can be
       // left out while the correspondent and document type lists stay.
@@ -586,7 +581,19 @@ class CustomOpenAIService {
         existingDocumentTypesList,
         config
       );
-      systemPrompt = [existingDataPrompt, process.env.SYSTEM_PROMPT, mustHavePrompt]
+      // The existing-data block already lists the correspondents, except when
+      // a custom prompt replaces everything in front of the JSON format.
+      const correspondentInstruction = buildCorrespondentInstruction(config, existingCorrespondentList, {
+        listAlreadyShown: Boolean(existingDataPrompt) && !customPrompt
+      });
+      // Build the prompt without touching config.mustHavePrompt: replacing its
+      // placeholders in place froze the first document's correspondent list
+      // into every later prompt. The existing-data block is included whatever
+      // the restrictions are, so a restricted run still sees the allowed names.
+      const mustHavePrompt = config.mustHavePrompt
+        .replace('%CUSTOMFIELDS%', customFieldsStr)
+        .replace('%EXISTING_CORRESPONDENTS%', correspondentInstruction);
+      systemPrompt = [existingDataPrompt, readSystemPrompt(), mustHavePrompt]
         .filter(Boolean)
         .join('\n\n');
       promptTags = '';
