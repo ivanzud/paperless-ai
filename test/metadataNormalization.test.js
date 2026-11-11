@@ -181,3 +181,63 @@ test('title replacements leave amounts, identifiers and parts of other tokens al
     assert.equal(apply('Invoice (ACME CORP)'), 'Invoice (Acme)');
   });
 });
+
+test('tag drop rules', () => {
+  withEnv({
+    METADATA_TAG_ALIASES: { '123 Main St': 'Main' },
+    METADATA_PROPERTY_TAGS: 'Main',
+    METADATA_DROP_ADDRESS_TAGS: 'yes',
+    METADATA_TAG_DROP_EXACT: ['Misc'],
+    METADATA_TAG_DROP_PATTERNS: ['^Q[1-4]\\s+\\d{4}$'],
+    METADATA_KEEP_NUMERIC_TAGS: ['1234']
+  }, () => {
+    const name = (tag) => MetadataNormalizationService.normalizeTagName(tag);
+    assert.equal(name('Misc'), null);
+    assert.equal(name('misc'), null);
+    assert.equal(name('Q3 2025'), null);
+    assert.equal(name('March 2024'), null);
+    assert.equal(name('98765'), null);
+    assert.equal(name('1234'), '1234');
+    assert.equal(name('2024'), '2024');
+    assert.equal(name('456 Oak Ave'), null);
+    assert.equal(name('123 Main St'), 'Main');
+    assert.equal(name(' -Bill, '), 'Bill');
+    assert.equal(name('INSURANCE'), 'Insurance');
+    assert.equal(name(''), null);
+    assert.equal(name(42), null);
+  });
+});
+
+test('a double-escaped drop pattern is repaired and reported', (t) => {
+  const warnings = silenceWarnings(t);
+  withEnv({
+    // What the app sees after one JSON encoding too many: two backslashes.
+    METADATA_TAG_DROP_PATTERNS: JSON.stringify(['^Q[1-4]\\\\s+\\\\d{4}$', '^Draft\\b'])
+  }, () => {
+    assert.equal(MetadataNormalizationService.getRules().dropTagPatterns[0].source, '^Q[1-4]\\s+\\d{4}$');
+    assert.equal(MetadataNormalizationService.normalizeTagName('Q3 2025'), null);
+    assert.equal(MetadataNormalizationService.normalizeTagName('Draft Copy'), null);
+    assert.equal(MetadataNormalizationService.normalizeTagName('Bill'), 'Bill');
+  });
+  assert.equal(warnings.filter((line) => line.includes('double-escaped')).length, 1);
+});
+
+test('the example policy carries drop patterns that compile to what they say', () => {
+  const policy = require('../config/local/paperless-policy.example.json');
+  withEnv({ METADATA_TAG_DROP_PATTERNS: JSON.stringify(policy.metadata.dropPatterns) }, () => {
+    const patterns = MetadataNormalizationService.getRules().dropTagPatterns;
+    assert.equal(patterns.length, policy.metadata.dropPatterns.length);
+    assert.equal(patterns.some((pattern) => pattern.test('March 2024')), true);
+    assert.equal(patterns.some((pattern) => pattern.source.includes('\\\\')), false);
+  });
+});
+
+test('normalizeTags removes duplicates and caps the number of tags', () => {
+  withEnv({ METADATA_TAG_ALIASES: undefined, METADATA_TAG_DROP_EXACT: undefined, METADATA_TAG_DROP_PATTERNS: undefined }, () => {
+    assert.deepEqual(
+      MetadataNormalizationService.normalizeTags(['Bill', 'bill', 'Tax', '98765', 'Insurance', 'Bank', 'Utility'], 4),
+      ['Bill', 'Tax', 'Insurance', 'Bank']
+    );
+    assert.deepEqual(MetadataNormalizationService.normalizeTags('Bill', 4), []);
+  });
+});

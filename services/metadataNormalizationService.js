@@ -297,10 +297,18 @@ class MetadataNormalizationService {
         continue;
       }
 
+      // A pattern that went through JSON encoding once too often arrives with
+      // doubled backslashes ("\\\\s+" instead of "\\s+") and then looks for a
+      // literal backslash, which no tag contains: it silently never matches.
+      const pattern = normalizedPattern.replace(/\\\\(?=[A-Za-z.()[\]{}+*?^$|/-])/g, '\\');
+      if (pattern !== normalizedPattern) {
+        console.warn(`[WARN] Pattern "${normalizedPattern}" from ${envName} is double-escaped; using "${pattern}"`);
+      }
+
       try {
-        compiledPatterns.push(new RegExp(normalizedPattern, 'i'));
+        compiledPatterns.push(new RegExp(pattern, 'i'));
       } catch (error) {
-        console.warn(`[WARN] Failed to compile pattern "${normalizedPattern}" from ${envName}: ${error.message}`);
+        console.warn(`[WARN] Failed to compile pattern "${pattern}" from ${envName}: ${error.message}`);
       }
     }
 

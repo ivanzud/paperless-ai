@@ -24,7 +24,7 @@
       "Misc"
     ],
     "dropPatterns": [
-      "^(January|February|March|April|May|June|July|August|September|October|November|December)\\\\s+\\\\d{4}$"
+      "^(January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{4}$"
     ],
     "keepNumericTags": [
       "1234"
