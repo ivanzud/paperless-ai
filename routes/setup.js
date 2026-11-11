@@ -3673,13 +3673,16 @@ router.post('/manual/updateDocument', express.json(), async (req, res) => {
  */
 router.get('/health', async (req, res) => {
   try {
-    // const isConfigured = await setupService.isConfigured();
-    // if (!isConfigured) {
-    //   return res.status(503).json({ 
-    //     status: 'not_configured',
-    //     message: 'Application setup not completed'
-    //   });
-    // }
+    // A fresh install that still needs the setup page is healthy. A
+    // configured one that has not reached Paperless and the AI provider yet
+    // is not: it cannot process anything, and reporting it healthy hides
+    // exactly that. The status is read without starting a check here.
+    if (setupService.getStatus() === 'waiting') {
+      return res.status(503).json({
+        status: 'waiting_for_backends',
+        message: 'Configuration not confirmed yet: Paperless or the AI provider did not answer'
+      });
+    }
     try {
       await documentModel.isDocumentProcessed(1);
     } catch (error) {
