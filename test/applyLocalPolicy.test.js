@@ -75,6 +75,23 @@ test('formatEnvValue refuses a value it cannot write unchanged', () => {
   assert.throws(() => formatEnvValue("it's `#1`"));
 });
 
+test('a value wrapped in quote characters keeps them through dotenv', () => {
+  const updates = {
+    DOUBLE: '"Acme"',
+    SINGLE: "'Acme'",
+    BACKTICK: '`Acme`',
+    INNER: 'say "Acme" twice',
+    JSON_LIST: '["Bill","Invoice"]'
+  };
+
+  const after = updateEnvContent('FIRST=1\n', updates);
+
+  assert.deepEqual(dotenv.parse(after), { FIRST: '1', ...updates });
+  assert.match(after, /^INNER=say "Acme" twice$/m);
+  assert.match(after, /^JSON_LIST=\["Bill","Invoice"\]$/m);
+  assert.equal(updateEnvContent(after, updates), after);
+});
+
 test('buildEnvUpdates writes drop patterns with single escaping', () => {
   const updates = buildEnvUpdates({
     metadata: {

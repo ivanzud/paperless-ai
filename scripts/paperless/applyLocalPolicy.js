@@ -165,7 +165,10 @@ function parseEnv(rawText) {
 // value (JSON with "Unit #5" in it) has to be written quoted to arrive whole.
 function formatEnvValue(value) {
   const text = String(value);
-  if (!/[#\r\n]/.test(text) && text === text.trim()) {
+  // A value that itself starts and ends with the same quote character would
+  // be read back without those quotes, so it needs quotes of another kind.
+  const wrappedInQuotes = /^(['"`])[\s\S]*\1$/.test(text);
+  if (!/[#\r\n]/.test(text) && text === text.trim() && !wrappedInQuotes) {
     return text;
   }
 
@@ -175,7 +178,7 @@ function formatEnvValue(value) {
     }
   }
 
-  throw new Error('Value contains "#" together with both quote characters and cannot be written to the env file unchanged');
+  throw new Error('Value needs quoting but contains both quote characters and cannot be written to the env file unchanged');
 }
 
 // Index of the last line of the value that starts on lines[index]. A quoted
