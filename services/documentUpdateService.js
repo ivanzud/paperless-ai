@@ -80,6 +80,10 @@ async function saveAnalyzedDocumentChanges({
       statusTitle,
       "complete",
     );
+    // A success ends the run of failures that the retry limit counts.
+    if (typeof documentModel.clearProcessingFailure === "function") {
+      await documentModel.clearProcessingFailure(documentId);
+    }
     return updatedDocument;
   } catch (error) {
     await documentModel.setProcessingStatus(documentId, statusTitle, "failed");

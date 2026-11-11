@@ -15,6 +15,8 @@ const ragService = require('./services/ragService');
 const setupRoutes = require('./routes/setup');
 const { normalizeCustomFieldValueForPaperless } = require('./services/serviceUtils');
 const { saveAnalyzedDocumentChanges } = require('./services/documentUpdateService');
+const { createFailedDocumentTracker } = require('./services/failedDocumentService');
+const failedDocuments = createFailedDocumentTracker({ documentModel, paperlessService });
 
 // Add environment variables for RAG service if not already set
 process.env.RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://localhost:8000';
@@ -220,6 +222,7 @@ async function saveOpenApiSpec() {
 async function processDocument(doc, existingTags, existingCorrespondentList, existingDocumentTypesList, ownUserId) {
   const isProcessed = await documentModel.isDocumentProcessed(doc.id, doc.checksum);
   if (isProcessed) return null;
+  if (await failedDocuments.shouldSkip(doc)) return null;
   await documentModel.setProcessingStatus(doc.id, doc.title, 'processing');
 
   try {
@@ -244,6 +247,7 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
     if (!content || content.length < 10) {
       console.log(`[DEBUG] Document ${doc.id} has no content, skipping analysis`);
       await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
+      await failedDocuments.recordFailure(doc, new Error('Document has no text content'));
       return null;
     }
 
@@ -556,6 +560,7 @@ async function scanInitial() {
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, toSafeError(error));
         await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
+        await failedDocuments.recordFailure(doc, error);
       }
     }
   } catch (error) {
@@ -607,6 +612,7 @@ async function scanDocuments() {
       } catch (error) {
         console.error(`[ERROR] processing document ${doc.id}:`, toSafeError(error));
         await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
+        await failedDocuments.recordFailure(doc, error);
       }
     }
   } catch (error) {

@@ -168,6 +168,32 @@ const clearProcessingStatus = db.prepare(`
   DELETE FROM processing_status WHERE document_id = ?
 `);
 
+// Consecutive failed processing attempts per document. A row is removed when
+// the document is processed successfully or reset.
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS processing_failures (
+    document_id INTEGER PRIMARY KEY,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    tagged INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`).run();
+
+const upsertProcessingFailure = db.prepare(`
+  INSERT INTO processing_failures (document_id, attempts, last_error)
+  VALUES (?, 1, ?)
+  ON CONFLICT(document_id) DO UPDATE SET
+    attempts = attempts + 1,
+    last_error = excluded.last_error,
+    updated_at = CURRENT_TIMESTAMP
+`);
+
+const findProcessingFailure = db.prepare(`
+  SELECT document_id, attempts, tagged, last_error, updated_at
+  FROM processing_failures WHERE document_id = ?
+`);
+
 const getActiveProcessing = db.prepare(`
   SELECT * FROM processing_status
   ORDER BY start_time DESC
@@ -371,6 +397,7 @@ module.exports = {
       console.log('[DEBUG] All history_documents deleted');
       db.prepare('DELETE FROM original_documents').run();
       console.log('[DEBUG] All original_documents deleted');
+      db.prepare('DELETE FROM processing_failures').run();
       return true;
     } catch (error) {
       console.error('[ERROR] deleting documents:', error);
@@ -407,6 +434,7 @@ module.exports = {
       const result = stmt.run(numericIds);
       const result2 = stmt2.run(numericIds);
       const result3 = stmt3.run(numericIds);
+      db.prepare(`DELETE FROM processing_failures WHERE document_id IN (${placeholders})`).run(numericIds);
 
       console.log('[DEBUG] SQL result:', result);
       console.log('[DEBUG] SQL result:', result2);
@@ -510,6 +538,24 @@ module.exports = {
       console.error('[ERROR] getting document type stats:', error);
       return [];
     }
+},
+
+// Counts one more failed attempt and returns the new count.
+async recordProcessingFailure(documentId, lastError = null) {
+  upsertProcessingFailure.run(documentId, lastError);
+  return findProcessingFailure.get(documentId).attempts;
+},
+
+async getProcessingFailure(documentId) {
+  return findProcessingFailure.get(documentId) || null;
+},
+
+async markProcessingFailureTagged(documentId) {
+  db.prepare('UPDATE processing_failures SET tagged = 1 WHERE document_id = ?').run(documentId);
+},
+
+async clearProcessingFailure(documentId) {
+  db.prepare('DELETE FROM processing_failures WHERE document_id = ?').run(documentId);
 },
 
 async setProcessingStatus(documentId, title, status) {

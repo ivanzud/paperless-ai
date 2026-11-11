@@ -29,6 +29,8 @@ const {
   saveAnalyzedDocumentChanges,
   saveManualDocumentChanges
 } = require('../services/documentUpdateService');
+const { createFailedDocumentTracker } = require('../services/failedDocumentService');
+const failedDocuments = createFailedDocumentTracker({ documentModel, paperlessService });
 require('dotenv').config({ path: '../data/.env' });
 
 /**
@@ -1610,6 +1612,7 @@ try {
           } catch (error) {
             console.error(`[ERROR] processing document ${doc.id}:`, toSafeError(error));
             await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
+            await failedDocuments.recordFailure(doc, error);
             if (isRateLimitError(error)) {
               console.warn('[WARNING] AI provider rate limit encountered (HTTP 429). Stopping current scan run to avoid rapid retries.');
               break;
@@ -1652,6 +1655,7 @@ async function reconcileStaleProcessedDocuments(documents) {
 async function processDocument(doc, existingTags, existingCorrespondentList, existingDocumentTypesList, ownUserId, customPrompt = null) {
   const isProcessed = await documentModel.isDocumentProcessed(doc.id, doc.checksum);
   if (isProcessed) return null;
+  if (await failedDocuments.shouldSkip(doc)) return null;
   await documentModel.setProcessingStatus(doc.id, doc.title, 'processing');
 
   const documentEditable = await paperlessService.getPermissionOfDocument(doc.id);
@@ -1673,6 +1677,7 @@ async function processDocument(doc, existingTags, existingCorrespondentList, exi
   if (!content || content.length < 10) {
     console.log(`[DEBUG] Document ${doc.id} has no content, skipping analysis`);
     await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
+    await failedDocuments.recordFailure(doc, new Error('Document has no text content'));
     return null;
   }
 
@@ -2631,6 +2636,7 @@ async function processQueue(customPrompt) {
       } catch (error) {
         console.error(`[ERROR] Failed to process document ${doc.id}:`, toSafeError(error));
         await documentModel.setProcessingStatus(doc.id, doc.title, 'failed');
+        await failedDocuments.recordFailure(doc, error);
         if (isRateLimitError(error)) {
           documentQueue.unshift(doc);
           queueRateLimitResumeAt = Date.now() + QUEUE_RATE_LIMIT_COOLDOWN_MS;

@@ -102,7 +102,7 @@ class RestrictionPromptService {
   // Queue and status tags drive the OCR/classification pipeline; offered to the
   // model as ordinary tags, one could be attached and re-queue the document.
   static isPipelineTag(name) {
-    const configured = [process.env.TAGS, process.env.AI_PROCESSED_TAG_NAME, process.env.BLOCK_SCAN_WHEN_TAGS_PRESENT]
+    const configured = [process.env.TAGS, process.env.AI_PROCESSED_TAG_NAME, process.env.AI_FAILED_TAG_NAME, process.env.BLOCK_SCAN_WHEN_TAGS_PRESENT]
       .flatMap(value => String(value || '').split(','))
       .map(value => value.trim().toLowerCase())
       .filter(Boolean);
