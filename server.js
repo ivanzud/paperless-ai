@@ -22,10 +22,9 @@ const failedDocuments = createFailedDocumentTracker({ documentModel, paperlessSe
 process.env.RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://localhost:8000';
 process.env.RAG_SERVICE_ENABLED = process.env.RAG_SERVICE_ENABLED || 'true';
 const cors = require('cors');
-const cookieParser = require('cookie-parser');
+const { buildCorsOptions, registerStaticAndDocs } = require('./routes/publicSurface');
 const Logger = require('./services/loggerService');
 const { max } = require('date-fns');
-const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
 
 const htmlLogger = new Logger({
@@ -73,51 +72,11 @@ function formatScanBlockerMessage(blockers) {
 }
 
 
-const corsOptions = {
-  origin: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type', 
-    'x-api-key',
-    'Access-Control-Allow-Private-Network'
-  ],
-  credentials: false
-};
-
-app.use(cors(corsOptions));
-
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key, Access-Control-Allow-Private-Network');
-  res.header('Access-Control-Allow-Private-Network', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
+// Same-origin only unless CORS_ALLOWED_ORIGINS names other origins.
+app.use(cors(buildCorsOptions()));
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(cookieParser());
-
-function sendOpenApiSpec(res) {
-  const openApiPath = path.join(process.cwd(), 'OPENAPI', 'openapi.json');
-  res.setHeader('Content-Type', 'application/json');
-
-  // Try to serve the static file first
-  fs.readFile(openApiPath)
-    .then(data => {
-      res.send(JSON.parse(data));
-    })
-    .catch(err => {
-      console.warn('Error reading OpenAPI file, generating dynamically:', err.message);
-      // Fallback to generating the spec if file can't be read
-      res.send(swaggerSpec);
-    });
-}
 
 /**
  * @swagger
@@ -153,19 +112,9 @@ function sendOpenApiSpec(res) {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.get('/api-docs/openapi.json', (req, res) => sendOpenApiSpec(res));
-
-// Add a redirect for the old endpoint for backward compatibility
-app.get('/api-docs.json', (req, res) => {
-  sendOpenApiSpec(res);
-});
-
-// Swagger documentation route (mounted after JSON endpoints)
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  swaggerOptions: {
-    url: '/api-docs/openapi.json'
-  }
-}));
+// Static assets for the login page stay public; the API documentation and
+// anything below /images require a login like the rest of the UI.
+registerStaticAndDocs(app, { publicDir: path.join(__dirname, 'public'), swaggerSpec });
 
 // View engine setup
 app.set('view engine', 'ejs');

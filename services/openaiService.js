@@ -12,6 +12,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { model } = require('./ollamaService');
 const RestrictionPromptService = require('./restrictionPromptService');
+const { ensureThumbnailCached } = require('./thumbnailCache');
 
 class OpenAIService {
   constructor() {
@@ -149,7 +150,6 @@ class OpenAIService {
   }
 
   async analyzeDocument(content, existingTags = [], existingCorrespondentList = [], existingDocumentTypesList = [], id, customPrompt = null, options = {}) {
-    const cachePath = path.join('./public/images', `${id}.png`);
     try {
       this.initialize();
       const now = new Date();
@@ -159,22 +159,9 @@ class OpenAIService {
         throw new Error('OpenAI client not initialized');
       }
 
-      // Handle thumbnail caching
-      try {
-        await fs.access(cachePath);
-        console.log('[DEBUG] Thumbnail already cached');
-      } catch (err) {
-        console.log('Thumbnail not cached, fetching from Paperless');
-
-        const thumbnailData = await paperlessService.getThumbnailImage(id);
-
-        if (!thumbnailData) {
-          console.warn('Thumbnail nicht gefunden');
-        }
-
-        await fs.mkdir(path.dirname(cachePath), { recursive: true });
-        await fs.writeFile(cachePath, thumbnailData);
-      }
+      // Cache the thumbnail for the UI. Best effort: a missing thumbnail is
+      // no reason to fail the analysis.
+      await ensureThumbnailCached(id, (documentId) => paperlessService.getThumbnailImage(documentId));
 
       // Get external API data if available and validate it
       let externalApiData = options.externalApiData || null;

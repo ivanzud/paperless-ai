@@ -31,6 +31,11 @@ const {
 } = require('../services/documentUpdateService');
 const { createFailedDocumentTracker } = require('../services/failedDocumentService');
 const failedDocuments = createFailedDocumentTracker({ documentModel, paperlessService });
+const {
+  ensureThumbnailCached,
+  getThumbnailCacheDir,
+  getThumbnailCachePath
+} = require('../services/thumbnailCache');
 require('dotenv').config({ path: '../data/.env' });
 
 /**
@@ -684,36 +689,24 @@ router.get('/playground', protectApiRoute, async (req, res) => {
  *               $ref: '#/components/schemas/Error'
  */
 router.get('/thumb/:documentId', async (req, res) => {
-  const cachePath = path.join('./public/images', `${req.params.documentId}.png`);
+  // Only plain document ids: the id becomes part of a file name in the cache.
+  const cachePath = getThumbnailCachePath(req.params.documentId);
+  if (!cachePath) {
+    return res.status(400).send('Invalid document id');
+  }
 
   try {
-    // Prüfe ob das Bild bereits im Cache existiert
-    try {
-      await fs.access(cachePath);
-      console.log('Serving cached thumbnail');
-      
-      // Wenn ja, sende direkt das gecachte Bild
-      res.setHeader('Content-Type', 'image/png');
-      return res.sendFile(path.resolve(cachePath));
-      
-    } catch (err) {
-      // File existiert nicht im Cache, hole es von Paperless
-      console.log('Thumbnail not cached, fetching from Paperless');
-      
-      const thumbnailData = await paperlessService.getThumbnailImage(req.params.documentId);
-      
-      if (!thumbnailData) {
-        return res.status(404).send('Thumbnail nicht gefunden');
-      }
+    const cached = await ensureThumbnailCached(
+      req.params.documentId,
+      (documentId) => paperlessService.getThumbnailImage(documentId)
+    );
 
-      // Speichere im Cache
-      await fs.mkdir(path.dirname(cachePath), { recursive: true }); // Erstelle Verzeichnis falls nicht existiert
-      await fs.writeFile(cachePath, thumbnailData);
-
-      // Sende das Bild
-      res.setHeader('Content-Type', 'image/png');
-      res.send(thumbnailData);
+    if (!cached) {
+      return res.status(404).send('Thumbnail nicht gefunden');
     }
+
+    res.setHeader('Content-Type', 'image/png');
+    return res.sendFile(path.basename(cached), { root: getThumbnailCacheDir() });
 
   } catch (error) {
     console.error('Fehler beim Abrufen des Thumbnails:', error);
