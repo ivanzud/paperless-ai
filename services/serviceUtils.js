@@ -116,51 +116,135 @@ function isLongTextCustomField(dataType) {
     return normalizedType === 'longtext' || normalizedType === 'textarea';
 }
 
-function normalizeMonetaryCustomFieldValue(value) {
+// What a model writes when it has nothing to put into a field. None of these
+// is a value, so none of them may reach Paperless.
+const EMPTY_VALUE_PATTERN = /^(?:n\s*\/\s*a|n\.a\.?|na|none|null|nil|undefined|unknown|not (?:applicable|available|found|specified|stated|provided|given)|tbd|empty|[-–—?.]+|fill in the value based on your analysis)$/i;
+const CURRENCY_MARKER_PATTERN = /^(?:[A-Za-z]{3}|US\$|[$€£¥])?$/;
+const MAX_MONETARY_WHOLE_DIGITS = 10;
+const CUSTOM_FIELD_DATE_YEARS_AHEAD = 20;
+
+function isEmptyCustomFieldValue(value) {
+    if (value === undefined || value === null) {
+        return true;
+    }
     if (typeof value !== 'string') {
-        return value;
+        return false;
     }
+    const trimmed = value.trim();
+    return !trimmed || EMPTY_VALUE_PATTERN.test(trimmed);
+}
 
-    const stripped = value
-        .trim()
-        .replace(/[^\d,.\-+]/g, '');
-
-    if (!stripped) {
-        return stripped;
-    }
-
-    const commaIndex = stripped.lastIndexOf(',');
-    const dotIndex = stripped.lastIndexOf('.');
-
-    if (commaIndex !== -1 && commaIndex > dotIndex) {
-        const decimalPart = stripped.slice(commaIndex + 1);
-        if (/^\d{1,4}$/.test(decimalPart)) {
-            const wholePart = stripped.slice(0, commaIndex).replace(/[.,]/g, '');
-            return `${wholePart}.${decimalPart}`;
+// Returns a plain "1234.56" string, or '' when the input is not exactly one
+// unambiguous non-zero amount. Storing nothing is preferred over a guess: the
+// previous version turned "1,763" into 1.763, kept "0" and glued two numbers
+// together.
+function normalizeMonetaryCustomFieldValue(value) {
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value) || value === 0) {
+            return '';
         }
+        value = value.toFixed(2);
     }
 
-    if (dotIndex !== -1 && commaIndex !== -1 && dotIndex > commaIndex) {
-        return stripped.replace(/,/g, '');
+    if (typeof value !== 'string' || isEmptyCustomFieldValue(value)) {
+        return '';
     }
 
-    return stripped;
+    let text = value.trim();
+    let negative = false;
+
+    const parenthesized = /^\((.*)\)$/.exec(text);
+    if (parenthesized) {
+        negative = true;
+        text = parenthesized[1].trim();
+    }
+
+    const numbers = text.match(/\d[\d.,]*/g) || [];
+    if (numbers.length !== 1) {
+        return '';
+    }
+
+    const token = numbers[0].replace(/[.,]+$/, '');
+    const tokenStart = text.indexOf(numbers[0]);
+    const before = text.slice(0, tokenStart).trim();
+    const after = text.slice(tokenStart + numbers[0].length).trim();
+
+    const prefix = /^([+-]?)\s*(.*?)\s*([+-]?)$/.exec(before);
+    if (!prefix || (prefix[1] && prefix[3]) || !CURRENCY_MARKER_PATTERN.test(prefix[2])) {
+        return '';
+    }
+    const sign = prefix[1] || prefix[3];
+    if (sign && parenthesized) {
+        return '';
+    }
+    if (sign === '-') {
+        negative = true;
+    }
+
+    // A trailing sign or any other trailing text ("45.00-", "5%", "per month")
+    // is not a plain amount.
+    if (!CURRENCY_MARKER_PATTERN.test(after)) {
+        return '';
+    }
+
+    let whole;
+    let fraction = '';
+    let match;
+    if ((match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(token))) {
+        [, whole, fraction = ''] = match;
+    } else if ((match = /^(\d{1,3}(?:,\d{3})+)(?:\.(\d{1,2}))?$/.exec(token))) {
+        whole = match[1].replace(/,/g, '');
+        fraction = match[2] || '';
+    } else if ((match = /^(\d{1,3}(?:\.\d{3})+),(\d{1,2})$/.exec(token))) {
+        whole = match[1].replace(/\./g, '');
+        fraction = match[2];
+    } else if ((match = /^(\d+),(\d{1,2})$/.exec(token))) {
+        [, whole, fraction] = match;
+    } else {
+        // "1.234" (thousands or three decimals?) and similar stay unresolved.
+        return '';
+    }
+
+    whole = whole.replace(/^0+(?=\d)/, '');
+    fraction = fraction.padEnd(2, '0');
+
+    if (whole.length > MAX_MONETARY_WHOLE_DIGITS || (/^0+$/.test(whole) && /^0+$/.test(fraction))) {
+        return '';
+    }
+
+    return `${negative ? '-' : ''}${whole}.${fraction}`;
+}
+
+// Returns YYYY-MM-DD or '' for a date custom field.
+function normalizeDateCustomFieldValue(value, now = new Date()) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    const MetadataNormalizationService = require('./metadataNormalizationService');
+    const parsed = MetadataNormalizationService.parseStrictDate(value, {
+        now,
+        maxYear: now.getFullYear() + CUSTOM_FIELD_DATE_YEARS_AHEAD
+    });
+    return parsed ? MetadataNormalizationService.formatDate(parsed) : '';
 }
 
 function normalizeCustomFieldValueForPaperless(value, fieldDetails = {}) {
     let normalizedValue = typeof value === 'string' ? value.trim() : value;
-    const dataType = fieldDetails.data_type || fieldDetails.dataType || '';
+    const dataType = String(fieldDetails.data_type || fieldDetails.dataType || '').toLowerCase();
 
-    if (String(dataType).toLowerCase() === 'monetary') {
-        normalizedValue = normalizeMonetaryCustomFieldValue(normalizedValue);
+    if (isEmptyCustomFieldValue(normalizedValue)) {
+        return '';
+    }
+
+    if (dataType === 'monetary') {
+        return normalizeMonetaryCustomFieldValue(normalizedValue);
     }
 
     // Paperless rejects a date field that is not YYYY-MM-DD, failing the whole
     // update; an unparseable date becomes empty so the field is skipped.
-    if (String(dataType).toLowerCase() === 'date' && typeof normalizedValue === 'string') {
-        const MetadataNormalizationService = require('./metadataNormalizationService');
-        const parsed = MetadataNormalizationService.parseDocumentDate(normalizedValue);
-        normalizedValue = parsed ? MetadataNormalizationService.formatDate(parsed) : '';
+    if (dataType === 'date') {
+        return normalizeDateCustomFieldValue(normalizedValue);
     }
 
     if (
@@ -325,6 +409,8 @@ module.exports = {
     modelSupportsCustomTemperature,
     buildTemperatureOption,
     isLongTextCustomField,
+    isEmptyCustomFieldValue,
     normalizeMonetaryCustomFieldValue,
+    normalizeDateCustomFieldValue,
     normalizeCustomFieldValueForPaperless
 };

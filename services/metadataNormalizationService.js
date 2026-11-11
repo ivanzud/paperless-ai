@@ -612,6 +612,87 @@ class MetadataNormalizationService {
     return format(date, 'yyyy-MM-dd');
   }
 
+  // Strict parser for dates written by the model. The lenient parser below
+  // accepts bare numbers ("21" -> year 2100), reads two-digit years as the
+  // year 26 and guesses the day/month order per separator. A wrong date is
+  // worse than none, so anything not listed here yields null.
+  static parseStrictDate(value, options = {}) {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const text = value.replace(/\s+/g, ' ').trim();
+    if (!text) {
+      return null;
+    }
+
+    const now = options.now instanceof Date ? options.now : new Date();
+    const minYear = Number.isInteger(options.minYear) ? options.minYear : 1900;
+    const maxYear = Number.isInteger(options.maxYear) ? options.maxYear : now.getFullYear() + 1;
+    const dayFirst = String(options.order || process.env.AMBIGUOUS_DATE_ORDER || 'MDY').trim().toUpperCase() === 'DMY';
+
+    let year;
+    let month;
+    let day;
+    let match;
+
+    if ((match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}\S*)?$/.exec(text))) {
+      // The date part is taken as written; converting a timestamp to local
+      // time could move it to the neighbouring day.
+      [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+    } else if ((match = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(text))) {
+      [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+    } else if ((match = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{4}|\d{2})$/.exec(text))) {
+      const first = Number(match[1]);
+      const second = Number(match[3]);
+      if (first > 12 && second <= 12) {
+        [day, month] = [first, second];
+      } else if (second > 12 && first <= 12) {
+        [month, day] = [first, second];
+      } else if (dayFirst) {
+        [day, month] = [first, second];
+      } else {
+        [month, day] = [first, second];
+      }
+
+      year = Number(match[4]);
+      if (match[4].length === 2) {
+        year += 2000;
+        if (year > maxYear) {
+          year -= 100;
+        }
+      }
+    } else if ((match = /^(?:[A-Za-z]{3,9},? )?([A-Za-z]{3,9})\.? (\d{1,2})(?:st|nd|rd|th)?,? (\d{4})$/.exec(text))) {
+      [month, day, year] = [this.monthNumber(match[1]), Number(match[2]), Number(match[3])];
+    } else if ((match = /^(\d{1,2})(?:st|nd|rd|th)?\.? ([A-Za-z]{3,9})\.?,? (\d{4})$/.exec(text))) {
+      [day, month, year] = [Number(match[1]), this.monthNumber(match[2]), Number(match[3])];
+    } else {
+      return null;
+    }
+
+    if (!month || year < minYear || year > maxYear) {
+      return null;
+    }
+
+    const parsed = new Date(year, month - 1, day);
+    if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day) {
+      return null;
+    }
+
+    return parsed;
+  }
+
+  static monthNumber(name) {
+    const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+    const lower = String(name || '').toLowerCase();
+    if (lower.length < 3) {
+      return null;
+    }
+
+    const index = months.findIndex((month) => month.startsWith(lower));
+    return index === -1 ? null : index + 1;
+  }
+
   static parseDocumentDate(value) {
     if (!value || typeof value !== 'string') {
       return null;
