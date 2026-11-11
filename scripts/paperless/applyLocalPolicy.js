@@ -161,32 +161,83 @@ function parseEnv(rawText) {
   return env;
 }
 
+// dotenv ends an unquoted value at the first "#" and trims it, so such a
+// value (JSON with "Unit #5" in it) has to be written quoted to arrive whole.
+function formatEnvValue(value) {
+  const text = String(value);
+  if (!/[#\r\n]/.test(text) && text === text.trim()) {
+    return text;
+  }
+
+  for (const quote of ["'", '`']) {
+    if (!text.includes(quote)) {
+      return `${quote}${text}${quote}`;
+    }
+  }
+
+  throw new Error('Value contains "#" together with both quote characters and cannot be written to the env file unchanged');
+}
+
+// Index of the last line of the value that starts on lines[index]. A quoted
+// value may span several lines (the system prompt does); those lines belong
+// to it even when they look like assignments themselves.
+function findValueEnd(lines, index, valueStart) {
+  const firstLine = lines[index].slice(valueStart).trimStart();
+  const quote = firstLine[0];
+  if (quote !== '`' && quote !== '"' && quote !== "'") {
+    return index;
+  }
+
+  const closes = (text) => new RegExp(`(?:^|[^\\\\])${quote}`).test(text);
+  if (closes(firstLine.slice(1)) || firstLine[1] === quote) {
+    return index;
+  }
+
+  for (let end = index + 1; end < lines.length; end += 1) {
+    if (closes(lines[end])) {
+      return end;
+    }
+  }
+
+  // Never closed: dotenv reads it as a one-line value as well.
+  return index;
+}
+
 function updateEnvContent(rawText, updates) {
   const lines = rawText.split(/\r?\n/);
   const pendingKeys = new Set(Object.keys(updates));
   const output = [];
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const separatorIndex = line.indexOf('=');
-    if (separatorIndex !== -1) {
-      const key = line.slice(0, separatorIndex).trim();
-      if (pendingKeys.has(key)) {
-        output.push(`${key}=${updates[key]}`);
-        pendingKeys.delete(key);
-        continue;
-      }
+    if (separatorIndex === -1 || line.trimStart().startsWith('#')) {
+      output.push(line);
+      continue;
     }
 
-    output.push(line);
+    const key = line.slice(0, separatorIndex).trim();
+    const valueEnd = findValueEnd(lines, index, separatorIndex + 1);
+    if (pendingKeys.has(key)) {
+      output.push(`${key}=${formatEnvValue(updates[key])}`);
+      pendingKeys.delete(key);
+    } else {
+      output.push(...lines.slice(index, valueEnd + 1));
+    }
+    index = valueEnd;
+  }
+
+  while (output.length > 0 && output[output.length - 1] === '') {
+    output.pop();
   }
 
   for (const key of Object.keys(updates)) {
     if (pendingKeys.has(key)) {
-      output.push(`${key}=${updates[key]}`);
+      output.push(`${key}=${formatEnvValue(updates[key])}`);
     }
   }
 
-  return `${output.filter((line, index, values) => !(index === values.length - 1 && line === '')).join('\n')}\n`;
+  return `${output.join('\n')}\n`;
 }
 
 function loadRuntimeEnv(options) {
@@ -562,7 +613,16 @@ async function main() {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-main().catch((error) => {
-  console.error(`[ERROR] ${error.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`[ERROR] ${error.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  buildEnvUpdates,
+  formatEnvValue,
+  parseEnv,
+  updateEnvContent
+};
