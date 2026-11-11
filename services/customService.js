@@ -2,6 +2,7 @@ const {
   calculateTokens,
   calculateTotalPromptTokens,
   truncateToTokenLimit,
+  truncateToEstimatedTokens,
   writePromptToFile,
   buildTemperatureOption
 } = require('./serviceUtils');
@@ -99,15 +100,23 @@ class CustomOpenAIService {
       return [];
     }
 
-    const approxCharsPerToken = 4;
-    const chunkChars = Math.max(2000, targetChunkTokens * approxCharsPerToken);
-    const overlapChars = Math.min(500, Math.floor(chunkChars * 0.1));
-    const step = Math.max(800, chunkChars - overlapChars);
+    // Size chunks by estimated tokens, not by a fixed number of characters:
+    // a page of amounts and account numbers holds several times more tokens
+    // per character than prose, and a chunk cut at 4 characters per token
+    // could be larger than the whole model context.
+    const budget = Math.max(1, Math.floor(Number(targetChunkTokens) || 0));
+    const windowChars = budget * 8;
     const chunks = [];
+    let start = 0;
 
-    for (let start = 0; start < text.length; start += step) {
-      const end = Math.min(start + chunkChars, text.length);
-      const chunk = text.slice(start, end).trim();
+    while (start < text.length) {
+      let piece = truncateToEstimatedTokens(text.slice(start, start + windowChars), budget);
+      if (!piece) {
+        piece = text.slice(start, start + 200);
+      }
+
+      const end = start + piece.length;
+      const chunk = piece.trim();
       if (chunk) {
         chunks.push({
           index: chunks.length,
@@ -118,6 +127,9 @@ class CustomOpenAIService {
       if (end >= text.length) {
         break;
       }
+
+      const overlapChars = Math.min(500, Math.floor(piece.length * 0.1));
+      start = end - overlapChars;
     }
 
     return chunks;
@@ -132,10 +144,18 @@ class CustomOpenAIService {
     const errorMessage = String(error?.error?.message || '').toLowerCase();
     const param = String(error?.param || error?.error?.param || '').toLowerCase();
 
+    // llama.cpp servers answer with type "exceed_context_size_error" and
+    // "request (N tokens) exceeds the available context size".
+    const type = String(error?.type || error?.error?.type || '').toLowerCase();
+
     return message.includes('maximum context length')
       || errorMessage.includes('maximum context length')
       || param === 'input_tokens'
-      || message.includes('input tokens');
+      || message.includes('input tokens')
+      || type.includes('context_size')
+      || type.includes('context_length')
+      || message.includes('context size')
+      || errorMessage.includes('context size');
   }
 
   _isRateLimitError(error) {
@@ -677,7 +697,10 @@ class CustomOpenAIService {
           } catch (chunkError) {
             lastError = chunkError;
             if (this._isContextOverflowError(chunkError) && chunkTokenBudget > 300) {
-              chunkTokenBudget = Math.max(300, Math.floor(chunkTokenBudget * 0.65));
+              // Shrink from what was actually sent: a chunk well below its
+              // budget would otherwise be sent again unchanged.
+              const sentChunkTokens = await calculateTokens(chunkContent, model);
+              chunkTokenBudget = Math.max(300, Math.floor(Math.min(chunkTokenBudget, sentChunkTokens) * 0.65));
               console.warn(
                 `[WARNING] Chunk ${chunk.index + 1} exceeded context, retrying with smaller budget (${chunkTokenBudget} tokens).`,
                 {

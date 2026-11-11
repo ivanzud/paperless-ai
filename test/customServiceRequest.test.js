@@ -168,3 +168,64 @@ test('a response log that cannot be written does not fail the document', async (
   const result = await customService._analyzeSingleChunk('system', 'text', 'example/local-model', 'now', 500);
   assert.equal(result.document.title, ANSWER.title);
 });
+
+test('context overflow is recognised in the OpenAI and in the llama.cpp wording', () => {
+  const llamaCpp = Object.assign(
+    new Error('400 request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it'),
+    { status: 400, type: 'exceed_context_size_error' }
+  );
+  assert.equal(customService._isContextOverflowError(llamaCpp), true);
+  assert.equal(customService._isContextOverflowError({ message: 'x', error: { type: 'exceed_context_size_error' } }), true);
+  assert.equal(customService._isContextOverflowError(new Error("This model's maximum context length is 8192 tokens")), true);
+  assert.equal(customService._isContextOverflowError(new Error('500 backend unavailable')), false);
+  assert.equal(customService._isContextOverflowError(null), false);
+});
+
+test('chunks are sized by estimated tokens and cover the whole text', () => {
+  const prose = 'Dear Jane Doe, thank you for your recent payment to Acme Water Company. '.repeat(60);
+  const table = Array.from(
+    { length: 200 },
+    (_, i) => `03/1${i % 9}/2025  POS PURCHASE EXAMPLE STORE #12${10 + i}  123.45  6789.01`
+  ).join('\n');
+  const text = `${prose}${table}\nEND OF STATEMENT`;
+
+  const chunks = customService._chunkContent(text, 1000);
+
+  assert.ok(chunks.length > 3);
+  for (const chunk of chunks) {
+    const estimate = estimateTokensForNonOpenAI(chunk.content);
+    assert.ok(estimate <= 1000, `chunk ${chunk.index} has ${estimate} estimated tokens`);
+  }
+  assert.ok(text.startsWith(chunks[0].content));
+  assert.ok(chunks[chunks.length - 1].content.endsWith('END OF STATEMENT'));
+  // Consecutive chunks overlap, so no text is lost between them.
+  for (let i = 1; i < chunks.length; i += 1) {
+    const head = chunks[i].content.slice(0, 20);
+    assert.ok(chunks[i - 1].content.includes(head), `chunk ${i} does not continue chunk ${i - 1}`);
+  }
+  assert.deepEqual(customService._chunkContent('', 1000), []);
+});
+
+test('a document that still overflows the context is retried with a smaller chunk', async (t) => {
+  const requests = useBackend(t, (payload) => {
+    const userContent = payload.messages[1].content;
+    if (userContent.length > 2500) {
+      throw Object.assign(
+        new Error('400 request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it'),
+        { status: 400, type: 'exceed_context_size_error' }
+      );
+    }
+    return completion(JSON.stringify(ANSWER));
+  });
+  // The text fits the token budget on paper; the backend disagrees.
+  const text = 'Statement of account for Jane Doe at Example Bank. '.repeat(60);
+
+  const result = await customService.analyzeDocument(text, [], [], [], 4242);
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.document.title, ANSWER.title);
+  assert.equal(requests.length, 2);
+  assert.ok(requests[0].messages[1].content.length > 2500);
+  assert.ok(requests[1].messages[1].content.length <= 2500);
+  assert.equal(requests[1].max_tokens, 500);
+});

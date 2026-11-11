@@ -87,10 +87,72 @@ function getCompatibleModel(model) {
 }
 
 // Estimate tokens for non-OpenAI models using character-based approximation
+// Token estimate for models without a local tokenizer. A flat "4 characters
+// per token" holds for prose only: tables, amounts and account numbers come
+// out at 1 to 2 characters per token, so a chunk sized that way can be several
+// times larger than the context it was budgeted for. This counts what
+// tokenizers actually split on. It is meant to err on the high side for
+// ordinary text; random letter soup can still exceed it.
 function estimateTokensForNonOpenAI(text) {
-    // Rough approximation: 1 token ≈ 4 characters for most models
-    // This is conservative and works reasonably well for Llama models
-    return Math.ceil(text.length / 4);
+    const value = String(text || '');
+    if (!value) {
+        return 0;
+    }
+
+    // Every digit and every punctuation mark or symbol is a token of its own.
+    let tokens = (value.match(/\p{Nd}/gu) || []).length
+        + (value.match(/[^\s\p{L}\p{Nd}]/gu) || []).length;
+
+    for (const word of value.match(/\p{L}+/gu) || []) {
+        if (/[\u2E80-\uFFFF]/.test(word)) {
+            // Scripts written without spaces: about one token per character.
+            tokens += word.length;
+        } else if (word.length > 1 && word === word.toUpperCase()) {
+            // Upper-case words are split into more pieces than lower-case ones.
+            tokens += Math.max(1, word.length / 3.5);
+        } else {
+            tokens += 1 + Math.max(0, word.length - 5) / 4;
+        }
+    }
+
+    // A single space before a word is part of that word's token. Other
+    // whitespace (before digits and symbols, column gaps, line breaks) is not.
+    tokens += (value.match(/\s+(?!\p{L})/gu) || []).length
+        + (value.match(/\s{2,}(?=\p{L})|\n(?=\p{L})/gu) || []).length;
+
+    return Math.ceil(tokens);
+}
+
+// Cut text so that its estimate fits, preferring a word boundary.
+function truncateToEstimatedTokens(text, maxTokens) {
+    const value = String(text || '');
+    const limit = Math.max(0, Math.floor(Number(maxTokens) || 0));
+    if (estimateTokensForNonOpenAI(value) <= limit) {
+        return value;
+    }
+    if (limit === 0) {
+        return '';
+    }
+
+    // Density varies inside a document (prose next to a table), so search for
+    // the longest prefix that fits instead of scaling by the average.
+    let low = 0;
+    let high = value.length;
+    while (high - low > 8) {
+        const middle = Math.floor((low + high) / 2);
+        if (estimateTokensForNonOpenAI(value.substring(0, middle)) <= limit) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    const candidate = value.substring(0, low);
+
+    const lastSpaceIndex = candidate.lastIndexOf(' ');
+    if (lastSpaceIndex > candidate.length * 0.8) {
+        return candidate.substring(0, lastSpaceIndex);
+    }
+    return candidate;
 }
 
 function modelSupportsCustomTemperature(model) {
@@ -315,23 +377,7 @@ async function truncateToTokenLimit(text, maxTokens, model = process.env.OPENAI_
             // Non-OpenAI model - use character-based estimation
             console.log(`[DEBUG] Using character-based truncation for model: ${model}`);
             
-            const estimatedTokens = estimateTokensForNonOpenAI(normalizedText);
-            
-            if (estimatedTokens <= maxTokens) {
-                return normalizedText;
-            }
-            
-            // Truncate based on character estimation (conservative approach)
-            const maxChars = maxTokens * 4; // 4 chars per token approximation
-            const truncatedText = normalizedText.substring(0, maxChars);
-            
-            // Try to break at a word boundary if possible
-            const lastSpaceIndex = truncatedText.lastIndexOf(' ');
-            if (lastSpaceIndex > maxChars * 0.8) { // Only if we don't lose too much text
-                return truncatedText.substring(0, lastSpaceIndex);
-            }
-            
-            return truncatedText;
+            return truncateToEstimatedTokens(normalizedText, maxTokens);
         }
         
         // OpenAI model - use tiktoken
@@ -353,22 +399,7 @@ async function truncateToTokenLimit(text, maxTokens, model = process.env.OPENAI_
         console.warn(`[WARNING] Token truncation failed for model ${model}, falling back to character estimation:`, error.message);
         
         // Fallback to character-based estimation
-        const estimatedTokens = estimateTokensForNonOpenAI(normalizedText);
-        
-        if (estimatedTokens <= maxTokens) {
-            return normalizedText;
-        }
-        
-        const maxChars = maxTokens * 4;
-        const truncatedText = normalizedText.substring(0, maxChars);
-        
-        // Try to break at a word boundary if possible
-        const lastSpaceIndex = truncatedText.lastIndexOf(' ');
-        if (lastSpaceIndex > maxChars * 0.8) {
-            return truncatedText.substring(0, lastSpaceIndex);
-        }
-        
-        return truncatedText;
+        return truncateToEstimatedTokens(normalizedText, maxTokens);
     }
 }
 
@@ -402,6 +433,8 @@ async function writePromptToFile(systemPrompt, truncatedContent, filePath = './l
 }
 
 module.exports = {
+    estimateTokensForNonOpenAI,
+    truncateToEstimatedTokens,
     calculateTokens,
     calculateTotalPromptTokens,
     truncateToTokenLimit,
