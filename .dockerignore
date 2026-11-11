@@ -52,3 +52,6 @@ test-updated-service.js
 .agents.root-owned*
 .beads/
 .venv/
+config/local/*.local.json
+*.local.*
+docker-compose.override.yml

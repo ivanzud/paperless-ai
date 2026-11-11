@@ -50,3 +50,7 @@ CLAUDE.md
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Local deployment files that must never be committed or baked into an image
+.beads/
+docker-compose.override.yml
