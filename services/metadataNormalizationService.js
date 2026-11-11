@@ -275,6 +275,9 @@ class MetadataNormalizationService {
       .sort((left, right) => right.length - left.length)
       .map((source) => this.escapeRegex(source))
       .join('|');
+    // A source only counts as a whole token: not inside a longer word or
+    // number, and not glued to the characters that make it part of an amount,
+    // an identifier, a path or an address ("$1234.00", "#1234", "1234-1").
     return {
       replacements,
       regex: new RegExp(`(?<![A-Za-z0-9$#@/_.,:-])(?:${alternation})(?![A-Za-z0-9@/_-]|[.,:]\\d)`, 'gi')
@@ -333,9 +336,6 @@ class MetadataNormalizationService {
       }
 
       const lowerPart = part.toLowerCase();
-    // A source only counts as a whole token: not inside a longer word or
-    // number, and not glued to the characters that make it part of an amount,
-    // an identifier, a path or an address ("$1234.00", "#1234", "1234-1").
       if (/^[A-Z]{2,3}$/.test(part) && !minorWords.has(lowerPart)) {
         return part;
       }
