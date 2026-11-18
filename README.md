@@ -4,6 +4,54 @@
 > I update it whenever my own setup needs a change, so there is no release schedule and no promise
 > of support. Issues and pull requests are welcome and are answered as time allows. The notices, badges and links further down come from the upstream project.
 
+## What this fork changes
+
+The fork is based on Paperless-AI 3.x. Upstream has since published 4.x, a complete rewrite, which this
+fork does not contain; some of the points below may be solved differently there. The fork is used with a
+local model through an OpenAI-compatible API, as the classification step after OCR.
+
+**Metadata quality**
+
+- Normalizes what the model returns before it is written: tag aliases, tags to drop (exact names or
+  patterns), title replacements and typo-tolerant matching against existing names
+  (`METADATA_TAG_ALIASES`, `METADATA_TAG_DROP_EXACT`, `METADATA_TAG_DROP_PATTERNS`,
+  `METADATA_TITLE_REPLACEMENTS`).
+- Correspondent aliases and a closed list of document types.
+- Dates are parsed strictly: no guessed fallback year, no dates in the future, and a configurable order
+  for ambiguous dates (`AMBIGUOUS_DATE_ORDER`).
+- Custom fields can be limited to the document types they fit
+  (`METADATA_CUSTOM_FIELD_DOCUMENT_TYPES`); an amount or date the model is unsure of is left empty.
+- Tags a document already has are left alone, and one refused custom field no longer discards the whole
+  update.
+- The values a document had before an update are stored in the history.
+
+**Local and OpenAI-compatible models**
+
+- Prompts and chunks are sized by token estimates, large documents are analysed in chunks, and the answer
+  length is capped so a model cannot run into its limit unnoticed.
+- Truncated or malformed JSON answers are repaired where possible and rejected otherwise.
+- Ollama: timeouts, retries with backoff, keep-alive and a thinking switch (`OLLAMA_TIMEOUT_MS`,
+  `OLLAMA_MAX_RETRIES`, `OLLAMA_KEEP_ALIVE`, `OLLAMA_THINKING`).
+- `CUSTOM_MAX_TOKENS_PARAM` and `CUSTOM_RESPONSE_FORMAT` for servers that differ from OpenAI.
+
+**Unattended processing**
+
+- A document that keeps failing is no longer retried on every scan; after `MAX_PROCESSING_ATTEMPTS` it is
+  marked with `AI_FAILED_TAG_NAME`. Configuration problems and an unreachable model do not count.
+- `BLOCK_SCAN_WHEN_TAGS_PRESENT` holds a document back while another tool is still working on it.
+- Rate-limit answers (HTTP 429) pause the scan and are retried.
+- Recycled document ids are detected by checksum.
+
+**Security and privacy**
+
+- `/setup`, thumbnails and the API documentation require a login once a user exists.
+- Sessions are never signed with a built-in default secret.
+- Logs are at info level by default and keep document details and secrets out.
+- TLS verification for Paperless is configurable, with a custom CA bundle (`PAPERLESS_VERIFY_SSL`,
+  `PAPERLESS_CA_BUNDLE`), and links can use a separate external URL (`PAPERLESS_EXTERNAL_URL`).
+
+All settings are listed in [`.env.example`](.env.example).
+
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/t/clusterzx/paperless-ai)](https://github.com/clusterzx/paperless-ai/commits/main)
 [![Docker Pulls](https://img.shields.io/docker/pulls/clusterzx/paperless-ai)](https://hub.docker.com/r/clusterzx/paperless-ai)
 [![GitHub Stars](https://img.shields.io/github/stars/clusterzx)](https://github.com/clusterzx)
