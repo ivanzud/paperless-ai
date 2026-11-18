@@ -1,8 +1,9 @@
 # 📄 Paperless-AI
 
-> **About this fork.** This is a personally maintained fork of [clusterzx/paperless-ai](https://github.com/clusterzx/paperless-ai).
-> I update it whenever my own setup needs a change, so there is no release schedule and no promise
-> of support. Issues and pull requests are welcome and are answered as time allows. The notices, badges and links further down come from the upstream project.
+> **About this fork.** This is a personally maintained fork of
+> [clusterzx/paperless-ai](https://github.com/clusterzx/paperless-ai). I update it whenever my own setup needs a
+> change, so there is no release schedule and no promise of support. Issues and pull requests are welcome and are
+> answered as time allows. The notices, badges and links further down come from the upstream project.
 
 ## What this fork changes
 
@@ -51,6 +52,35 @@ local model through an OpenAI-compatible API, as the classification step after O
   `PAPERLESS_CA_BUNDLE`), and links can use a separate external URL (`PAPERLESS_EXTERNAL_URL`).
 
 All settings are listed in [`.env.example`](.env.example).
+
+## Using it together with paperless-gpt
+
+This fork is run as the second of two steps behind [paperless-ngx](https://github.com/paperless-ngx/paperless-ngx).
+[paperless-gpt](https://github.com/ivanzud/paperless-gpt) first reads the text of each new document with a
+vision model; this tool then sets title, tags, correspondent, document type, date and custom fields from that
+text. The two tools never talk to each other: each one watches for a tag, and paperless-ngx workflows pass the
+document along.
+
+1. A workflow adds `paperless-gpt-ocr-auto` to every new document.
+2. paperless-gpt runs OCR and adds `paperless-gpt-ocr-complete`.
+3. A workflow then adds `paperless-ai-auto`.
+4. This tool picks the document up on its next scan, updates the metadata and adds `ai-processed`.
+5. A workflow removes the pipeline tags.
+
+The settings on this side:
+
+```ini
+PROCESS_PREDEFINED_DOCUMENTS=yes
+TAGS=paperless-ai-auto
+ADD_AI_PROCESSED_TAG=yes
+AI_PROCESSED_TAG_NAME=ai-processed
+BLOCK_SCAN_WHEN_TAGS_PRESENT=paperless-gpt-ocr-auto
+AI_FAILED_TAG_NAME=paperless-ai-failed
+MAX_PROCESSING_ATTEMPTS=3
+```
+
+The full description, with the tags to create, the four workflows and the paperless-gpt settings, is in the
+[paperless-gpt fork's README](https://github.com/ivanzud/paperless-gpt#using-it-together-with-paperless-ai).
 
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/t/clusterzx/paperless-ai)](https://github.com/clusterzx/paperless-ai/commits/main)
 [![Docker Pulls](https://img.shields.io/docker/pulls/clusterzx/paperless-ai)](https://hub.docker.com/r/clusterzx/paperless-ai)
