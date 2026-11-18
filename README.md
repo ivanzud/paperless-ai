@@ -81,6 +81,10 @@ MAX_PROCESSING_ATTEMPTS=3
 
 The full description, with the tags to create, the four workflows and the paperless-gpt settings, is in the
 [paperless-gpt fork's README](https://github.com/ivanzud/paperless-gpt#using-it-together-with-paperless-ai).
+To set all of it up with one command, use the ready-made files in
+[`examples/pipeline`](https://github.com/ivanzud/paperless-gpt/tree/main/examples/pipeline) there.
+
+The image of this fork is published as `ghcr.io/ivanzud/paperless-ai:latest` (CPU) and `:latest-gpu`.
 
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/t/clusterzx/paperless-ai)](https://github.com/clusterzx/paperless-ai/commits/main)
 [![Docker Pulls](https://img.shields.io/docker/pulls/clusterzx/paperless-ai)](https://hub.docker.com/r/clusterzx/paperless-ai)
