@@ -42,6 +42,8 @@ local model through an OpenAI-compatible API, as the classification step after O
 - `BLOCK_SCAN_WHEN_TAGS_PRESENT` holds a document back while another tool is still working on it.
 - Rate-limit answers (HTTP 429) pause the scan and are retried.
 - Recycled document ids are detected by checksum.
+- A document put back into the queue right after it was processed is processed again instead of being
+  skipped.
 
 **Security and privacy**
 
@@ -81,8 +83,6 @@ MAX_PROCESSING_ATTEMPTS=3
 
 The full description, with the tags to create, the four workflows and the paperless-gpt settings, is in the
 [paperless-gpt fork's README](https://github.com/ivanzud/paperless-gpt#using-it-together-with-paperless-ai).
-To set all of it up with one command, use the ready-made files in
-[`examples/pipeline`](https://github.com/ivanzud/paperless-gpt/tree/main/examples/pipeline) there.
 
 The image of this fork is published as `ghcr.io/ivanzud/paperless-ai:latest` (CPU) and `:latest-gpu`.
 
