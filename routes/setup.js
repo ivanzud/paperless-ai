@@ -31,6 +31,7 @@ const {
 } = require('../services/documentUpdateService');
 const { createFailedDocumentTracker } = require('../services/failedDocumentService');
 const failedDocuments = createFailedDocumentTracker({ documentModel, paperlessService });
+const requeue = require('../services/requeueService').createRequeueDetector({ documentModel, paperlessService });
 const {
   ensureThumbnailCached,
   getThumbnailCacheDir,
@@ -1646,8 +1647,7 @@ async function reconcileStaleProcessedDocuments(documents) {
 }
 
 async function processDocument(doc, existingTags, existingCorrespondentList, existingDocumentTypesList, ownUserId, customPrompt = null) {
-  const isProcessed = await documentModel.isDocumentProcessed(doc.id, doc.checksum);
-  if (isProcessed) return null;
+  if (await requeue.isProcessed(doc)) return null;
   if (await failedDocuments.shouldSkip(doc)) return null;
   await documentModel.setProcessingStatus(doc.id, doc.title, 'processing');
 

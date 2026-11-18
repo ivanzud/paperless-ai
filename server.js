@@ -17,6 +17,7 @@ const { normalizeCustomFieldValueForPaperless } = require('./services/serviceUti
 const { saveAnalyzedDocumentChanges } = require('./services/documentUpdateService');
 const { createFailedDocumentTracker } = require('./services/failedDocumentService');
 const failedDocuments = createFailedDocumentTracker({ documentModel, paperlessService });
+const requeue = require('./services/requeueService').createRequeueDetector({ documentModel, paperlessService });
 
 // Add environment variables for RAG service if not already set
 process.env.RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://localhost:8000';
@@ -169,8 +170,7 @@ async function saveOpenApiSpec() {
 
 // Document processing functions
 async function processDocument(doc, existingTags, existingCorrespondentList, existingDocumentTypesList, ownUserId) {
-  const isProcessed = await documentModel.isDocumentProcessed(doc.id, doc.checksum);
-  if (isProcessed) return null;
+  if (await requeue.isProcessed(doc)) return null;
   if (await failedDocuments.shouldSkip(doc)) return null;
   await documentModel.setProcessingStatus(doc.id, doc.title, 'processing');
 
