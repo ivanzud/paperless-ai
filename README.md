@@ -1,5 +1,9 @@
 # 📄 Paperless-AI
 
+> **About this fork.** This is a personally maintained fork of [clusterzx/paperless-ai](https://github.com/clusterzx/paperless-ai).
+> I update it whenever my own setup needs a change, so there is no release schedule and no promise
+> of support. Issues and pull requests are welcome and are answered as time allows. The notices, badges and links further down come from the upstream project.
+
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/t/clusterzx/paperless-ai)](https://github.com/clusterzx/paperless-ai/commits/main)
 [![Docker Pulls](https://img.shields.io/docker/pulls/clusterzx/paperless-ai)](https://hub.docker.com/r/clusterzx/paperless-ai)
 [![GitHub Stars](https://img.shields.io/github/stars/clusterzx)](https://github.com/clusterzx)
